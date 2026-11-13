@@ -14,7 +14,7 @@
   (form-action), and limits network requests (connect-src) and images (img-src). img-src includes the
   Supabase project domain because book covers are served from Supabase Storage.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-yN2EE+BXmm8SBEHxfG9aNhuy6IrvBQCF4+sRCshBREM=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-rB9VtpZj2aSf/ei9HY8aS47L23UoYrHY0DThmhsX+Qs=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
 <title>Ink and Spine</title>
 <script>
 /**
@@ -7357,9 +7357,6 @@ function BookAuthCard(p) {
           placeholder: p.emailPlaceholder || "Email address",
           "aria-label": p.emailPlaceholder || "Email address",
           autoComplete: p.emailAutoComplete || "email",
-          autoCapitalize: "none",
-          autoCorrect: "off",
-          spellCheck: false,
           value: p.email,
           onChange: p.onEmail,
         }),
@@ -8061,21 +8058,7 @@ function InkAndSpine() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       loginThrottle.fail();
-      const why = (err && err.message) || "";
-      if (/email not confirmed/i.test(why)) {
-        setLoginError(
-          "This account's email address hasn't been confirmed yet. Open the confirmation email, or confirm the user in Supabase (Authentication > Users).",
-        );
-      } else if (/invalid login credentials/i.test(why)) {
-        setLoginError("Incorrect email or password.");
-      } else if ((err && err.status === 429) || /rate limit|too many/i.test(why)) {
-        setLoginError("Too many sign-in attempts. Please wait a few minutes and try again.");
-      } else if (/failed to fetch|network|load failed/i.test(why)) {
-        setLoginError("Couldn't reach the server. Check your internet connection and try again.");
-      } else {
-        // e.g. the password was right but the account's profile couldn't be loaded
-        setLoginError("Couldn't sign in: " + (why || "unknown error") + ".");
-      }
+      setLoginError("Incorrect email or password.");
       setLoginBusy(false);
     }
   }
