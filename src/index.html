@@ -14,7 +14,7 @@
   (form-action), and limits network requests (connect-src) and images (img-src). img-src includes the
   Supabase project domain because book covers are served from Supabase Storage.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-pfxa7d3JqK5f+J2O7WOgJ3XTfiN0Rd/9czz892PSUeQ=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-OTtf5+FqDspi89i0sOqGmW1L5zqGeMq3jVBPjQNY1cc=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
 <title>Ink and Spine</title>
 <script>
 /**
@@ -6811,7 +6811,7 @@ function ReviewCover({ review, c, width }) {
   if (url) {
     return E(
       "div",
-      { style: { ...box, background: c.surface, boxShadow: "0 10px 24px rgba(0,0,0,0.35)" } },
+      { className: "mmr-cover", style: { ...box, background: c.surface, boxShadow: "0 10px 24px rgba(0,0,0,0.35)" } },
       E("img", {
         src: url,
         alt: "Cover of " + review.title,
@@ -6825,6 +6825,7 @@ function ReviewCover({ review, c, width }) {
     "div",
     {
       "aria-hidden": "true",
+      className: "mmr-cover",
       style: {
         ...box,
         background: bg,
@@ -7097,14 +7098,15 @@ function ReviewsPage({ c, btn, inputStyle, isAdmin, readerUser }) {
       {
         onSubmit: submitEditor,
         noValidate: true,
+        className: "mmr-editor",
         style: {
           background: c.surface,
           border: "1px solid " + c.line,
           borderRadius: 8,
           padding: 28,
           marginBottom: 36,
-          display: "flex",
-          flexDirection: "column",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr)",
           gap: 20,
         },
       },
@@ -7250,7 +7252,7 @@ function ReviewsPage({ c, btn, inputStyle, isAdmin, readerUser }) {
         ),
         E(
           "aside",
-          { style: { flex: "0 1 280px", display: "flex", flexDirection: "column", gap: 16 } },
+          { className: "mmr-aside", style: { flex: "0 1 280px", display: "flex", flexDirection: "column", gap: 16 } },
           E(ReviewCover, { review: r, c }),
           buyBtn(r, true),
           E("p", { style: { color: c.textFaint, fontSize: 13, margin: 0 } }, "Opens Amazon in a new tab. Price and availability are shown on Amazon."),
@@ -7269,8 +7271,8 @@ function ReviewsPage({ c, btn, inputStyle, isAdmin, readerUser }) {
       E("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, color: c.textFaint } }, E("span", { style: { color: c.accent } }, r.genre), E("span", null, reviewDateText(r.review_date))),
       E("div", null, E("h3", { className: "mg-display", style: { fontSize: 20, margin: 0, lineHeight: 1.2 } }, r.title), E("span", { style: { color: c.textSoft, fontSize: 14 } }, "by " + r.author)),
       E("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, E(ReviewStars, { value: Number(r.rating), size: 16, color: "#E0B24A", empty: c.line }), E("span", { style: { color: c.textSoft, fontSize: 14 } }, Number(r.rating).toFixed(1))),
-      E("p", { style: { margin: 0, color: c.textSoft, fontSize: 15 } }, reviewExcerpt(r.body)),
-      E("div", { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" } }, E("button", { type: "button", className: smallClass, style: small, onClick: () => { setOpenId(r.id); mmrScrollTop(); } }, "Read the review"), buyBtn(r, false)),
+      E("p", { className: "mmr-excerpt", style: { margin: 0, color: c.textSoft, fontSize: 15 } }, reviewExcerpt(r.body)),
+      E("div", { className: "mmr-actions", style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" } }, E("button", { type: "button", className: smallClass, style: small, onClick: () => { setOpenId(r.id); mmrScrollTop(); } }, "Read the review"), buyBtn(r, false)),
       adminButtons(r),
     );
   }
@@ -7299,12 +7301,12 @@ function ReviewsPage({ c, btn, inputStyle, isAdmin, readerUser }) {
                 "div",
                 { style: { display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 28 } },
                 genres.map((g) => E("button", { key: g, type: "button", className: smallClass, "aria-pressed": genre === g, onClick: () => setGenre(g), style: { ...small, borderRadius: 999, padding: "8px 16px", background: genre === g ? c.accent : "transparent", color: genre === g ? c.accentOn : c.textSoft, borderColor: genre === g ? c.accent : c.line } }, g)),
-                E("input", { type: "search", value: query, onChange: (e) => setQuery(e.target.value), placeholder: "Search reviews…", "aria-label": "Search reviews", style: { ...inputStyle, width: 220, marginLeft: "auto", padding: "8px 12px", fontSize: 14 } }),
+                E("input", { type: "search", className: "mmr-search", value: query, onChange: (e) => setQuery(e.target.value), placeholder: "Search reviews…", "aria-label": "Search reviews", style: { ...inputStyle, width: 220, marginLeft: "auto", padding: "8px 12px", fontSize: 14 } }),
               ),
             loading
               ? E(
               "div",
-              { "aria-busy": "true", "aria-label": "Loading reviews", style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 36 } },
+              { "aria-busy": "true", "aria-label": "Loading reviews", className: "mmr-grid", style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 36 } },
               [0, 1, 2].map((i) =>
                 E(
                   "div",
@@ -7321,7 +7323,7 @@ function ReviewsPage({ c, btn, inputStyle, isAdmin, readerUser }) {
                   ? E("p", { style: { color: c.textFaint, fontSize: 16 } }, isAdmin ? "No reviews yet. Click “+ Write a review” to publish your first one." : "No reviews yet. Check back soon.")
                   : shown.length === 0
                     ? E("p", { style: { color: c.textFaint } }, "No reviews match that search.")
-                    : E("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 36 } }, shown.map(card)),
+                    : E("div", { className: "mmr-grid", style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 36 } }, shown.map(card)),
             disclosure,
           ),
     ),
@@ -8540,6 +8542,12 @@ function InkAndSpine() {
   const [fanartFormErrors, setFanartFormErrors] = useState({});
   const [fanartSubmitBusy, setFanartSubmitBusy] = useState(false);
   const [fanartSubmitSuccess, setFanartSubmitSuccess] = useState("");
+  useEffect(() => {
+    const nav = document.querySelector("nav.mg-nav");
+    const on = nav && nav.querySelector(".mg-nav-link.is-active");
+    if (nav && on && nav.scrollWidth > nav.clientWidth)
+      nav.scrollLeft += on.getBoundingClientRect().left - nav.getBoundingClientRect().left - (nav.clientWidth - on.offsetWidth) / 2;
+  }, [page]);
   const isAdmin = !!(readerUser && readerProfile && readerProfile.role === "admin");
   const isAdminRef = useRef(false);
   isAdminRef.current = isAdmin;
@@ -9658,11 +9666,51 @@ function InkAndSpine() {
           .mg-container { padding-left: 14px !important; padding-right: 14px !important; }
           header .mg-display { letter-spacing: 0.12em !important; font-size: 18px !important; }
         }
+
+        /* ---- phone layout ---- */
+        @media (max-width: 760px) {
+          #root { overflow-x: clip; }
+          /* a header a third of the screen tall must not stay stuck to the top while reading */
+          header.mg-site-header { position: static !important; padding: 14px 0 !important; }
+          .mg-window-dots { display: none; }
+          /* the menu becomes one swipeable row instead of two cramped ones */
+          nav.mg-nav { flex-wrap: nowrap !important; overflow-x: auto; overflow-y: hidden; gap: 6px !important; padding: 5px 6px !important; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+          nav.mg-nav::-webkit-scrollbar { display: none; }
+          .mg-nav-link { flex: 0 0 auto; white-space: nowrap; min-height: 40px; padding: 8px 14px; }
+          .mg-header-right { flex-wrap: wrap; gap: 8px !important; justify-content: flex-start !important; }
+          .mg-header-right > * { flex-shrink: 0; }
+          .mg-header-right button { min-height: 40px; white-space: nowrap; }
+          .mg-header-right > div:first-child { min-width: 0; flex-shrink: 1; }
+          .mg-header-right > div:first-child > span { overflow: hidden; text-overflow: ellipsis; max-width: 34vw; }
+          .mg-search-box { order: 10; flex: 1 1 100% !important; padding: 10px 14px !important; }
+          .mg-avatar { display: none; }
+          .mg-search-box .ink-kbd, .mg-search-box .ink-kbd-hint { display: none; }
+          /* 16px inputs stop iPhones zooming the page when a field is tapped */
+          input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=file]), select, textarea { font-size: 16px !important; }
+          /* footer links: same look, but easy to hit */
+          footer nav { gap: 0 4px !important; }
+          footer nav button { padding: 12px 8px !important; min-height: 44px; }
+          footer .mg-container { justify-content: flex-start !important; }
+          /* MM Book Review */
+          .mmr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 26px 14px !important; }
+          .mmr-small::after { inset: -6px 0; }
+          .mmr-card { min-width: 0; overflow-wrap: anywhere; }
+          .mmr-card > button + div { flex-wrap: wrap; gap: 2px 8px !important; }
+          .mmr-card h3 { font-size: 17px !important; }
+          .mmr-excerpt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px !important; }
+          .mmr-actions { flex-direction: column; align-items: stretch !important; }
+          .mmr-actions > * { width: 100%; min-height: 40px; display: flex !important; align-items: center; justify-content: center; text-align: center; }
+          .mmr-search { width: 100% !important; margin-left: 0 !important; }
+          .mmr-editor { padding: 18px !important; }
+          .mmr-aside { order: -1; flex: 1 1 100% !important; }
+          .mmr-aside .mmr-cover { max-width: 170px; }
+        }
       `,
     ),
     /* @__PURE__ */ React.createElement(
       "header",
       {
+        className: "mg-site-header",
         style: {
           padding: "20px 0",
           borderBottom: `1px solid ${c.line}`,
