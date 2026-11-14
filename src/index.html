@@ -14,7 +14,7 @@
   (form-action), and limits network requests (connect-src) and images (img-src). img-src includes the
   Supabase project domain because book covers are served from Supabase Storage.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-rB9VtpZj2aSf/ei9HY8aS47L23UoYrHY0DThmhsX+Qs=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-pfxa7d3JqK5f+J2O7WOgJ3XTfiN0Rd/9czz892PSUeQ=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
 <title>Ink and Spine</title>
 <script>
 /**
@@ -343,6 +343,27 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   p, li { text-wrap: pretty; }
   /* keep content clear of notches and home bars */
   body { padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+
+
+  .ink-hit { touch-action: manipulation; }
+  .ink-hit::after { content: ""; position: absolute; inset: -7px; }
+  /* press feedback: controls squash slightly under the finger, then spring back */
+  .mmr-press { transition: transform 0.12s cubic-bezier(.2,.8,.2,1), background 0.16s ease, border-color 0.16s ease; touch-action: manipulation; }
+  .mmr-press:active { transform: scale(0.96); }
+  /* review cards lift a little on hover, so the clickable thing is obvious */
+  .mmr-cover { transition: transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease; }
+  .mmr-card:hover .mmr-cover, .mmr-card:focus-within .mmr-cover { transform: translateY(-4px); }
+  /* small buttons keep their look but get an invisible, bigger touch area (Fitts's law) */
+  .mmr-small { position: relative; }
+  .mmr-small::after { content: ""; position: absolute; inset: -6px -4px; }
+  @media (pointer: coarse) { .mmr-small { min-height: 40px; } }
+  /* errors shake once so they cannot be missed */
+  @keyframes inkShake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+  .ink-shake { animation: inkShake 0.34s cubic-bezier(.36,.07,.19,.97) 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .ink-shake, .mmr-press, .mmr-cover { animation: none !important; transition: none !important; }
+    .mmr-press:active, .mmr-card:hover .mmr-cover, .mmr-card:focus-within .mmr-cover { transform: none; }
+  }
 
   /* skeleton loaders */
   .ink-skel { background: linear-gradient(90deg, rgba(127,127,127,0.12), rgba(127,127,127,0.26), rgba(127,127,127,0.12)); background-size: 200% 100%; animation: inkShimmer 1.3s linear infinite; }
@@ -824,12 +845,12 @@ const bookUploadLimiter = makeRateLimiter(10, 5 * 60 * 1000); // 10 admin book u
 const bookOpenLimiter = makeRateLimiter(20, 60 * 1000); // 20 book downloads per minute
 
 async function signUpReader(email, password) {
-  const { data, error } = await sb.auth.signUp({ email, password });
+  const { data, error } = await sb.auth.signUp({ email: String(email || "").trim(), password });
   if (error) throw error;
   return data;
 }
 async function signInReader(email, password) {
-  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  const { data, error } = await sb.auth.signInWithPassword({ email: String(email || "").trim(), password });
   if (error) throw error;
   return data;
 }
@@ -1538,6 +1559,149 @@ function BookRatingChip({ book, readerUser, onSignIn }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// MM Book Review (replaces the old Fanart page)
+// Reviews live in the "reviews" table; cover images live in the "review-covers" bucket.
+// Anyone can read. Only admins can write (enforced by Row Level Security, see supabase-mm-reviews.sql).
+
+// Your Amazon Associates tracking ID (looks like "yourname-20"). When filled in, it is added to every
+// Amazon link that does not already carry a tag. Leave it empty to add nothing.
+const AMAZON_TAG = "";
+const REVIEW_DISCLOSURE =
+  "As an Amazon Associate I earn from qualifying purchases. If you buy through a link on this page, I may earn a small commission at no extra cost to you. It never changes my rating.";
+const REVIEW_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const REVIEW_FALLBACK_COLORS = ["#1F3A34", "#5A2230", "#3A4466", "#C98A1B", "#24402F", "#8A3B2A", "#2A3560"];
+
+// Accepts only https links to Amazon (or its short-link domains). Adds the tracking tag when missing.
+// Returns null for anything else, so a pasted "javascript:" or look-alike link can never be saved or shown.
+function cleanAmazonLink(raw) {
+  let text = String(raw || "").trim();
+  // forgiving input: "amazon.com/dp/..." or "www.amazon.com/..." works without typing https://
+  if (text && !/^[a-z][a-z0-9+.-]*:/i.test(text) && /^(www\.)?(amazon\.|amzn\.|a\.co\/)/i.test(text)) text = "https://" + text;
+  let url;
+  try {
+    url = new URL(text);
+  } catch (err) {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+  const host = url.hostname.toLowerCase();
+  const isShort = host === "amzn.to" || host === "a.co" || host === "amzn.eu";
+  const isAmazon = /(^|\.)amazon\.(com|co\.uk|co\.jp|com\.au|com\.br|com\.mx|com\.tr|ca|de|fr|it|es|nl|se|pl|in|sg|ae|sa|eg|cn)$/.test(host);
+  if (!isShort && !isAmazon) return null;
+  if (isAmazon && AMAZON_TAG && !url.searchParams.get("tag")) url.searchParams.set("tag", AMAZON_TAG);
+  return url.toString();
+}
+function amazonHrefFor(review) {
+  const own = review.amazon_link ? cleanAmazonLink(review.amazon_link) : null;
+  if (own) return own;
+  return (
+    "https://www.amazon.com/s?k=" +
+    encodeURIComponent(review.title + " " + review.author) +
+    (AMAZON_TAG ? "&tag=" + encodeURIComponent(AMAZON_TAG) : "")
+  );
+}
+function reviewCoverUrl(path) {
+  return path ? sb.storage.from("review-covers").getPublicUrl(path).data.publicUrl : "";
+}
+function reviewDateText(iso) {
+  const p = String(iso || "").split("-");
+  if (p.length !== 3) return "";
+  return new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+function mmrScrollTop() {
+  window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+}
+function todayIso() {
+  const d = new Date();
+  const two = (n) => (n < 10 ? "0" : "") + n;
+  return d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" + two(d.getDate());
+}
+function reviewLines(text) {
+  return String(text || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+function reviewParagraphs(text) {
+  return String(text || "")
+    .trim()
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/\s*\n\s*/g, " ").trim())
+    .filter(Boolean);
+}
+function reviewExcerpt(body) {
+  const first = reviewParagraphs(body)[0] || "";
+  return first.length > 170 ? first.slice(0, 167).replace(/\s+\S*$/, "") + "..." : first;
+}
+async function fetchReviewRows() {
+  const { data, error } = await sb
+    .from("reviews")
+    .select("*")
+    .order("review_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+async function saveReviewRow(id, fields) {
+  if (id) {
+    const { data, error } = await sb.from("reviews").update(fields).eq("id", id).select().single();
+    if (error) throw error;
+    return data;
+  }
+  const { data, error } = await sb.from("reviews").insert(fields).select().single();
+  if (error) throw error;
+  return data;
+}
+async function deleteReviewRow(id) {
+  const { data, error } = await sb.from("reviews").delete().eq("id", id).select("id");
+  if (error) throw error;
+  if (!data || !data.length) throw new Error("permission denied: nothing was deleted (only admins can delete reviews).");
+}
+async function uploadReviewCover(dataUrl) {
+  return uploadDataUrlImage(
+    "review-covers",
+    (ext) => Date.now() + "-" + Math.random().toString(36).slice(2, 8) + "." + ext,
+    dataUrl,
+  );
+}
+async function removeReviewCover(path) {
+  if (!path) return;
+  try {
+    await sb.storage.from("review-covers").remove([path]);
+  } catch (err) {}
+}
+// Shrinks a chosen picture to at most 600 x 900 and returns it as a small JPEG data URL.
+function readCoverFile(file) {
+  return new Promise((resolve, reject) => {
+    if (ALLOWED_IMAGE_TYPES.indexOf(file.type) === -1) return reject(new Error(IMAGE_TYPE_ERROR));
+    if (file.size > REVIEW_MAX_IMAGE_BYTES) return reject(new Error("That image is over 5 MB. Please choose a smaller one."));
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("That file could not be read."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That file could not be read as an image."));
+      img.onload = () => {
+        const scale = Math.min(1, 600 / img.width, 900 / img.height);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 // Fanart gallery - readers submit art, it's queued as "pending" until an admin
 // (profiles.role === 'admin' via RLS) approves it, then it shows up for everyone.
 async function fetchFanartRows(onlyMine, userId) {
@@ -1632,7 +1796,7 @@ function mergeSiteBooksIntoShelves(prevShelves, rows) {
 // convenience view only and NOT a security record. The real record is the admin_audit table in
 // Supabase (admin-only INSERT policy), written by recordAdminAudit() below.
 const auditLogKey = "ink-admin-audit-log";
-const idleTimeoutMs = 20 * 60 * 1000; // auto sign-out after 20 minutes of no activity
+const idleTimeoutMs = 24 * 60 * 60 * 1000; // auto sign-out after 24 hours of no activity
 
 function getAuditLog() {
   try {
@@ -5942,7 +6106,7 @@ const KNOWN_PAGES = [
   "browse",
   "upload",
   "authors",
-  "fanart",
+  "reviews",
   "comments",
   "contact",
   "admin",
@@ -5959,7 +6123,7 @@ function routeFromHash() {
     raw = "";
   }
   if (!raw) return { page: "home", missing: "" };
-  const id = raw.toLowerCase();
+  const id = raw.toLowerCase() === "fanart" ? "reviews" : raw.toLowerCase();
   return KNOWN_PAGES.indexOf(id) !== -1 ? { page: id, missing: "" } : { page: "not-found", missing: raw.slice(0, 80) };
 }
 const SHELVES = [
@@ -6032,7 +6196,7 @@ const SHAREABLE_PAGES = [
   { id: "home", label: "Home" },
   { id: "browse", label: "Browse" },
   { id: "authors", label: "Authors" },
-  { id: "fanart", label: "Fanart" },
+  { id: "reviews", label: "MM Reviews" },
   { id: "comments", label: "Comments" },
   { id: "contact", label: "Contact" },
 ];
@@ -6222,7 +6386,7 @@ function buildTermsSections(cfg) {
     {
       h: "4. User Accounts",
       p: [
-        "Visitors can read without an account. Creating a reader account is optional and lets you submit fanart; administrator accounts are reader accounts that have been granted the admin role.",
+        "Visitors can read without an account. Creating a reader account is optional; administrator accounts are reader accounts that have been granted the admin role.",
       ],
     },
     {
@@ -6614,6 +6778,556 @@ function LegalLayout({ title, updated, intro, sections, page, goTo, theme }) {
     ),
   );
 }
+// MM Book Review page. Rendered as a real component (E(ReviewsPage, ...)) so it can keep its own state.
+const MMR_STAR_PATH = "M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.2 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8z";
+function ReviewStars({ value, size, color, empty }) {
+  const star = (key, pct) =>
+    E(
+      "span",
+      { key, style: { position: "relative", display: "inline-block", width: size, height: size, color: empty } },
+      E("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "currentColor", "aria-hidden": "true" }, E("path", { d: MMR_STAR_PATH })),
+      E(
+        "span",
+        { style: { position: "absolute", left: 0, top: 0, width: pct + "%", height: size, overflow: "hidden", color } },
+        E(
+          "svg",
+          { width: size, height: size, viewBox: "0 0 24 24", fill: "currentColor", "aria-hidden": "true", style: { display: "block" } },
+          E("path", { d: MMR_STAR_PATH }),
+        ),
+      ),
+    );
+  const stars = [];
+  for (let n = 1; n <= 5; n++) stars.push(star(n, value >= n ? 100 : value >= n - 0.5 ? 50 : 0));
+  return E(
+    "span",
+    { role: "img", "aria-label": Number(value).toFixed(1) + " out of 5 stars", style: { display: "inline-flex", gap: 2 } },
+    stars,
+  );
+}
+
+function ReviewCover({ review, c, width }) {
+  const url = reviewCoverUrl(review.cover_path);
+  const box = { width: width || "100%", aspectRatio: "2 / 3", borderRadius: 4, overflow: "hidden", flex: "none" };
+  if (url) {
+    return E(
+      "div",
+      { style: { ...box, background: c.surface, boxShadow: "0 10px 24px rgba(0,0,0,0.35)" } },
+      E("img", {
+        src: url,
+        alt: "Cover of " + review.title,
+        loading: "lazy",
+        style: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
+      }),
+    );
+  }
+  const bg = REVIEW_FALLBACK_COLORS[String(review.title || "").length % REVIEW_FALLBACK_COLORS.length];
+  return E(
+    "div",
+    {
+      "aria-hidden": "true",
+      style: {
+        ...box,
+        background: bg,
+        color: "#F2ECDA",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        padding: "14px 12px",
+        boxSizing: "border-box",
+        boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
+      },
+    },
+    E("span", { className: "mg-display", style: { fontSize: 20, lineHeight: 1.15 } }, review.title),
+    E("span", { style: { fontSize: 12, opacity: 0.8 } }, review.author),
+  );
+}
+
+function ReviewsPage({ c, btn, inputStyle, isAdmin, readerUser }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [genre, setGenre] = useState("All");
+  const [query, setQuery] = useState("");
+  const [openId, setOpenId] = useState(null);
+  const [editor, setEditor] = useState(null); // null, or { id, coverPath, form, errors, busy, saveError }
+  const [confirmId, setConfirmId] = useState(null);
+  const [notice, setNotice] = useState("");
+
+  async function load() {
+    setLoading(true);
+    setLoadError("");
+    try {
+      setRows(await fetchReviewRows());
+    } catch (err) {
+      setLoadError(
+        /relation .* does not exist|schema cache/i.test((err && err.message) || "")
+          ? "The reviews table hasn't been set up yet. Run supabase-mm-reviews.sql in the Supabase SQL Editor."
+          : (err && err.message) || "Couldn't load reviews.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, []);
+
+  function flash(text) {
+    setNotice(text);
+    setTimeout(() => setNotice((cur) => (cur === text ? "" : cur)), 5000);
+  }
+
+  const genres = ["All"].concat(rows.map((r) => r.genre).filter((g, i, a) => g && a.indexOf(g) === i));
+  const q = query.trim().toLowerCase();
+  const shown = rows.filter(
+    (r) => (genre === "All" || r.genre === genre) && (!q || (r.title + " " + r.author).toLowerCase().indexOf(q) !== -1),
+  );
+  const open = openId ? rows.find((r) => r.id === openId) : null;
+  const showDisclosure = !!AMAZON_TAG || rows.some((r) => /[?&]tag=/.test(r.amazon_link || ""));
+
+  const smallClass = "mmr-press mmr-small";
+  const small = {
+    fontFamily: "'Source Serif 4', serif",
+    fontSize: 13,
+    padding: "6px 12px",
+    borderRadius: 4,
+    border: "1px solid " + c.line,
+    background: "none",
+    color: "inherit",
+    cursor: "pointer",
+  };
+  const ghost = { ...btn, background: "none", color: "inherit", border: "1px solid " + c.line, padding: "12px 20px", fontSize: 15 };
+  const buyBtn = (review, big) =>
+    E(
+      "a",
+      {
+        href: amazonHrefFor(review),
+        className: "mmr-press",
+        target: "_blank",
+        rel: "sponsored nofollow noopener",
+        style: {
+          ...btn,
+          background: "#F0B341",
+          color: "#1B1407",
+          padding: big ? "13px 22px" : "8px 14px",
+          fontSize: big ? 16 : 14,
+          textAlign: "center",
+          borderRadius: 4,
+        },
+      },
+      "Buy on Amazon",
+    );
+
+  // ---- editor ----------------------------------------------------------------
+  function blankForm() {
+    return { title: "", author: "", genre: "", rating: 0, date: todayIso(), image: "", link: "", verdict: "", text: "", loved: "", notLoved: "", fit: "" };
+  }
+  function startWrite() {
+    setEditor({ id: null, coverPath: "", form: blankForm(), errors: {}, busy: false, saveError: "" });
+    mmrScrollTop();
+  }
+  function startEdit(r) {
+    setEditor({
+      id: r.id,
+      coverPath: r.cover_path || "",
+      form: {
+        title: r.title,
+        author: r.author,
+        genre: r.genre,
+        rating: Number(r.rating),
+        date: r.review_date,
+        image: r.cover_path ? reviewCoverUrl(r.cover_path) : "",
+        link: r.amazon_link || "",
+        verdict: r.verdict,
+        text: r.body,
+        loved: (r.loved || []).join("\n"),
+        notLoved: (r.not_loved || []).join("\n"),
+        fit: r.fit || "",
+      },
+      errors: {},
+      busy: false,
+      saveError: "",
+    });
+    mmrScrollTop();
+  }
+  function setField(key, value) {
+    setEditor((ed) => ({ ...ed, form: { ...ed.form, [key]: value }, errors: { ...ed.errors, [key]: "" } }));
+  }
+  async function chooseCover(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const data = await readCoverFile(file);
+      setEditor((ed) => ({ ...ed, form: { ...ed.form, image: data }, errors: { ...ed.errors, image: "" } }));
+    } catch (err) {
+      setEditor((ed) => ({ ...ed, errors: { ...ed.errors, image: (err && err.message) || "Couldn't use that image." } }));
+    }
+  }
+  async function submitEditor(e) {
+    e.preventDefault();
+    const f = editor.form;
+    const link = f.link.trim() ? cleanAmazonLink(f.link) : "";
+    const errors = {};
+    if (!f.title.trim()) errors.title = "Add the book title.";
+    if (!f.author.trim()) errors.author = "Add the author.";
+    if (!f.genre.trim()) errors.genre = "Add a genre.";
+    if (!(f.rating > 0)) errors.rating = "Give it a star rating. Half stars are fine.";
+    if (!f.date) errors.date = "Pick the date you read it.";
+    if (f.link.trim() && !link)
+      errors.link = "That doesn't look like an Amazon link. It should start with https:// and be from amazon or amzn.to.";
+    if (!f.verdict.trim()) errors.verdict = "Add a one-line verdict.";
+    if (f.text.trim().length < 50) errors.text = "Write at least 50 characters.";
+    if (Object.keys(errors).length) {
+      setEditor((ed) => ({ ...ed, errors, saveError: "" }));
+      return;
+    }
+    setEditor((ed) => ({ ...ed, busy: true, saveError: "", errors: {} }));
+    let newCover = "";
+    try {
+      const isNewImage = f.image && f.image.indexOf("data:") === 0;
+      if (isNewImage) newCover = await uploadReviewCover(f.image);
+      const coverPath = isNewImage ? newCover : f.image ? editor.coverPath : "";
+      const saved = await saveReviewRow(editor.id, {
+        title: f.title.trim(),
+        author: f.author.trim(),
+        genre: f.genre.trim(),
+        rating: f.rating,
+        review_date: f.date,
+        cover_path: coverPath || null,
+        amazon_link: link || null,
+        verdict: f.verdict.trim(),
+        body: reviewParagraphs(f.text).join("\n\n"),
+        loved: reviewLines(f.loved),
+        not_loved: reviewLines(f.notLoved),
+        fit: f.fit.trim() || null,
+      });
+      if (editor.coverPath && editor.coverPath !== coverPath) removeReviewCover(editor.coverPath);
+      recordAdminAudit(editor.id ? "Edited Review" : "Published Review", saved.title);
+      setRows((prev) => {
+        const without = prev.filter((r) => r.id !== saved.id);
+        return without.concat(saved).sort((a, b) => String(b.review_date).localeCompare(String(a.review_date)) || String(b.created_at).localeCompare(String(a.created_at)));
+      });
+      setEditor(null);
+      setOpenId(saved.id);
+      flash(editor.id ? "Changes saved." : "Review published.");
+      mmrScrollTop();
+    } catch (err) {
+      if (newCover) removeReviewCover(newCover);
+      setEditor((ed) => ({
+        ...ed,
+        busy: false,
+        saveError: /row-level security|permission denied/i.test((err && err.message) || "")
+          ? "Only admin accounts can save reviews. Sign in as an admin and try again."
+          : (err && err.message) || "Couldn't save this review. Please try again.",
+      }));
+    }
+  }
+  async function removeReview(r) {
+    setConfirmId(null);
+    try {
+      await deleteReviewRow(r.id);
+      removeReviewCover(r.cover_path);
+      recordAdminAudit("Deleted Review", r.title);
+      setRows((prev) => prev.filter((x) => x.id !== r.id));
+      if (openId === r.id) setOpenId(null);
+      flash("Review deleted.");
+    } catch (err) {
+      flash((err && err.message) || "Couldn't delete this review.");
+    }
+  }
+
+  const label = (text, forId) =>
+    E("label", { htmlFor: forId, style: { display: "block", fontSize: 14, fontWeight: 600, marginBottom: 6 } }, text);
+  const fieldWrap = (key, text, control, help) =>
+    E(
+      "div",
+      { key, style: { display: "flex", flexDirection: "column", flex: "1 1 240px", minWidth: 0 } },
+      label(text, "rv-" + key),
+      control,
+      help && E("span", { style: { color: c.textFaint, fontSize: 13, marginTop: 6 } }, help),
+      editor && editor.errors[key] && E("span", { role: "alert", className: "ink-shake", style: { color: c.danger, fontSize: 13, marginTop: 6 } }, editor.errors[key]),
+    );
+  const textInput = (key, extra) =>
+    E("input", {
+      id: "rv-" + key,
+      value: editor.form[key],
+      onChange: (e) => setField(key, e.target.value),
+      style: inputStyle,
+      ...extra,
+    });
+  const textArea = (key, rows2, placeholder) =>
+    E("textarea", {
+      id: "rv-" + key,
+      rows: rows2,
+      value: editor.form[key],
+      placeholder,
+      onChange: (e) => setField(key, e.target.value),
+      style: { ...inputStyle, resize: "vertical", lineHeight: 1.55 },
+    });
+
+  function editorForm() {
+    if (!editor) return null;
+    const f = editor.form;
+    const picker = [];
+    for (let n = 1; n <= 5; n++) {
+      const pct = f.rating >= n ? 100 : f.rating >= n - 0.5 ? 50 : 0;
+      picker.push(
+        E(
+          "div",
+          { key: n, style: { position: "relative", width: 34, height: 34 } },
+          E(ReviewStars, { value: pct === 100 ? 1 : pct === 50 ? 0.5 : 0, size: 34, color: "#E0B24A", empty: c.line }),
+          E("button", {
+            type: "button",
+            "aria-label": n - 0.5 + " stars",
+            onClick: () => setField("rating", n - 0.5),
+            style: { position: "absolute", left: 0, top: 0, width: "50%", height: "100%", opacity: 0, cursor: "pointer", border: 0, padding: 0 },
+          }),
+          E("button", {
+            type: "button",
+            "aria-label": n + (n === 1 ? " star" : " stars"),
+            onClick: () => setField("rating", n),
+            style: { position: "absolute", right: 0, top: 0, width: "50%", height: "100%", opacity: 0, cursor: "pointer", border: 0, padding: 0 },
+          }),
+        ),
+      );
+    }
+    return E(
+      "form",
+      {
+        onSubmit: submitEditor,
+        noValidate: true,
+        style: {
+          background: c.surface,
+          border: "1px solid " + c.line,
+          borderRadius: 8,
+          padding: 28,
+          marginBottom: 36,
+          display: "flex",
+          flexDirection: "column",
+          gap: 20,
+        },
+      },
+      E("h3", { className: "mg-display", style: { fontSize: 22, margin: 0 } }, editor.id ? "Edit review" : "Write a review"),
+      E(
+        "div",
+        { style: { display: "flex", gap: 16, flexWrap: "wrap" } },
+        fieldWrap("title", "Book title", textInput("title", { placeholder: "e.g. Project Hail Mary" })),
+        fieldWrap("author", "Author", textInput("author", { placeholder: "e.g. Andy Weir" })),
+        fieldWrap(
+          "genre",
+          "Genre",
+          E(
+            React.Fragment,
+            null,
+            textInput("genre", { list: "rv-genres", placeholder: "Pick or type a new one" }),
+            E("datalist", { id: "rv-genres" }, genres.filter((g) => g !== "All").map((g) => E("option", { key: g, value: g }))),
+          ),
+        ),
+      ),
+      E(
+        "div",
+        { style: { display: "flex", gap: 16, flexWrap: "wrap" } },
+        E(
+          "div",
+          { style: { display: "flex", flexDirection: "column", flex: "1 1 240px" } },
+          E("span", { style: { fontSize: 14, fontWeight: 600, marginBottom: 6 } }, "Your rating"),
+          E(
+            "div",
+            { role: "group", "aria-label": "Your rating", style: { display: "flex", alignItems: "center", gap: 4 } },
+            picker,
+            E("span", { style: { marginLeft: 10, color: c.textSoft, fontSize: 14 } }, f.rating > 0 ? f.rating.toFixed(1) + " / 5" : "No rating yet"),
+          ),
+          editor.errors.rating && E("span", { role: "alert", className: "ink-shake", style: { color: c.danger, fontSize: 13, marginTop: 6 } }, editor.errors.rating),
+        ),
+        fieldWrap("date", "Date read", textInput("date", { type: "date" })),
+        E(
+          "div",
+          { style: { display: "flex", flexDirection: "column", flex: "1 1 240px" } },
+          E("span", { style: { fontSize: 14, fontWeight: 600, marginBottom: 6 } }, "Book cover image"),
+          E(
+            "div",
+            { style: { display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" } },
+            f.image && E("img", { src: f.image, alt: "Selected cover preview", style: { width: 56, height: 84, objectFit: "cover", borderRadius: 3 } }),
+            E(
+              "label",
+              { style: { ...small, display: "inline-block" } },
+              f.image ? "Replace image" : "+ Choose an image",
+              E("input", { type: "file", accept: IMAGE_ACCEPT, onChange: chooseCover, style: { display: "none" }, "aria-label": "Choose cover image" }),
+            ),
+            f.image && E("button", { type: "button", className: smallClass, style: small, onClick: () => setField("image", "") }, "Remove"),
+          ),
+          E("span", { style: { color: c.textFaint, fontSize: 13, marginTop: 6 } }, "JPG, PNG or WebP, up to 5 MB. Optional."),
+          editor.errors.image && E("span", { role: "alert", className: "ink-shake", style: { color: c.danger, fontSize: 13, marginTop: 6 } }, editor.errors.image),
+        ),
+      ),
+      fieldWrap(
+        "link",
+        "Amazon link for this book",
+        textInput("link", { type: "url", placeholder: "https://www.amazon.com/dp/..." }),
+        AMAZON_TAG
+          ? "Paste the book's Amazon page link. Your tracking tag is added for you if it's missing. Leave blank to link to an Amazon search."
+          : "Paste the book's Amazon page link (your Associates link works). Leave blank to link to an Amazon search.",
+      ),
+      fieldWrap("verdict", "One-line verdict", textInput("verdict", { maxLength: 140, placeholder: "Your verdict in one sentence" })),
+      fieldWrap("text", "Your review", textArea("text", 9, "Write your review here. Leave a blank line between paragraphs."), "At least 50 characters. A blank line starts a new paragraph."),
+      E(
+        "div",
+        { style: { display: "flex", gap: 16, flexWrap: "wrap" } },
+        fieldWrap("loved", "What I loved", textArea("loved", 4, "One point per line"), "Optional."),
+        fieldWrap("notLoved", "What I didn't love", textArea("notLoved", 4, "One point per line"), "Optional."),
+      ),
+      fieldWrap("fit", "Who it's for", textInput("fit", { placeholder: "e.g. Readers who enjoy slow, character-driven stories" }), "Optional."),
+      editor.saveError && E("p", { role: "alert", className: "ink-shake", style: { color: c.danger, fontSize: 14, margin: 0 } }, editor.saveError),
+      E(
+        "div",
+        { style: { display: "flex", gap: 12, flexWrap: "wrap" } },
+        E("button", { type: "submit", className: "mmr-press", disabled: editor.busy, style: { ...btn, border: "none", opacity: editor.busy ? 0.6 : 1 } }, editor.busy ? "Saving…" : editor.id ? "Save changes" : "Publish review"),
+        E("button", { type: "button", disabled: editor.busy, onClick: () => setEditor(null), style: ghost }, "Cancel"),
+      ),
+    );
+  }
+
+  const adminButtons = (r) =>
+    isAdmin &&
+    E(
+      "div",
+      { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+      E("button", { type: "button", className: smallClass, style: small, onClick: () => startEdit(r) }, "Edit"),
+      confirmId === r.id
+        ? E(
+            React.Fragment,
+            null,
+            E("button", { type: "button", className: smallClass, style: { ...small, background: c.danger, color: "#fff", borderColor: c.danger }, onClick: () => removeReview(r) }, "Confirm delete"),
+            E("button", { type: "button", className: smallClass, style: small, onClick: () => setConfirmId(null) }, "Keep"),
+          )
+        : E("button", { type: "button", className: smallClass, style: small, onClick: () => setConfirmId(r.id) }, "Delete"),
+    );
+
+  const disclosure = showDisclosure && E("p", { style: { color: c.textFaint, fontSize: 13, maxWidth: "70ch", margin: "28px 0 0" } }, REVIEW_DISCLOSURE);
+
+  // ---- one review ------------------------------------------------------------
+  function detail(r) {
+    const paragraphs = reviewParagraphs(r.body);
+    const box = (title, items) =>
+      E(
+        "div",
+        { style: { flex: "1 1 240px", border: "1px solid " + c.line, borderRadius: 8, padding: "16px 20px" } },
+        E("h4", { className: "mg-display", style: { fontSize: 17, margin: "0 0 8px" } }, title),
+        E("ul", { style: { margin: 0, paddingLeft: 18, color: c.textSoft, display: "flex", flexDirection: "column", gap: 4 } }, items.map((t, i) => E("li", { key: i }, t))),
+      );
+    return E(
+      "div",
+      null,
+      E("button", { type: "button", className: smallClass, onClick: () => { setOpenId(null); setEditor(null); }, style: { ...small, marginBottom: 24 } }, "← All reviews"),
+      editor ? editorForm() : null,
+      E(
+        "div",
+        { style: { display: "flex", gap: 40, flexWrap: "wrap", alignItems: "flex-start" } },
+        E(
+          "article",
+          { style: { flex: "1 1 460px", minWidth: 0 } },
+          E("span", { style: { color: c.accent, fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase" } }, r.genre + " · " + reviewDateText(r.review_date)),
+          E("h2", { className: "mg-display", style: { fontSize: "clamp(30px, 5vw, 42px)", lineHeight: 1.1, margin: "8px 0 4px" } }, r.title),
+          E("p", { style: { color: c.textSoft, margin: "0 0 16px", fontSize: 18 } }, "by " + r.author),
+          E(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 18 } },
+            E(ReviewStars, { value: Number(r.rating), size: 24, color: "#E0B24A", empty: c.line }),
+            E("strong", null, Number(r.rating).toFixed(1) + " / 5"),
+          ),
+          E("p", { className: "mg-display", style: { fontSize: 22, lineHeight: 1.4, margin: "0 0 22px", color: c.text } }, r.verdict),
+          paragraphs.map((p, i) => E("p", { key: i, style: { fontSize: 18, lineHeight: 1.75, color: c.textSoft, margin: "0 0 18px", maxWidth: "62ch" } }, p)),
+          ((r.loved && r.loved.length) || (r.not_loved && r.not_loved.length)) &&
+            E(
+              "div",
+              { style: { display: "flex", gap: 16, flexWrap: "wrap", margin: "28px 0" } },
+              r.loved && r.loved.length ? box("What I loved", r.loved) : null,
+              r.not_loved && r.not_loved.length ? box("What I didn't love", r.not_loved) : null,
+            ),
+          r.fit && E("div", null, E("h3", { className: "mg-display", style: { fontSize: 20, margin: "0 0 6px" } }, "Who it's for"), E("p", { style: { color: c.textSoft, fontSize: 18, margin: 0 } }, r.fit)),
+          disclosure,
+        ),
+        E(
+          "aside",
+          { style: { flex: "0 1 280px", display: "flex", flexDirection: "column", gap: 16 } },
+          E(ReviewCover, { review: r, c }),
+          buyBtn(r, true),
+          E("p", { style: { color: c.textFaint, fontSize: 13, margin: 0 } }, "Opens Amazon in a new tab. Price and availability are shown on Amazon."),
+          adminButtons(r),
+        ),
+      ),
+    );
+  }
+
+  // ---- list ------------------------------------------------------------------
+  function card(r) {
+    return E(
+      "article",
+      { key: r.id, className: "mmr-card", style: { display: "flex", flexDirection: "column", gap: 12 } },
+      E("button", { type: "button", onClick: () => { setOpenId(r.id); mmrScrollTop(); }, "aria-label": "Read the review of " + r.title, style: { all: "unset", cursor: "pointer", display: "block" } }, E(ReviewCover, { review: r, c })),
+      E("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, color: c.textFaint } }, E("span", { style: { color: c.accent } }, r.genre), E("span", null, reviewDateText(r.review_date))),
+      E("div", null, E("h3", { className: "mg-display", style: { fontSize: 20, margin: 0, lineHeight: 1.2 } }, r.title), E("span", { style: { color: c.textSoft, fontSize: 14 } }, "by " + r.author)),
+      E("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, E(ReviewStars, { value: Number(r.rating), size: 16, color: "#E0B24A", empty: c.line }), E("span", { style: { color: c.textSoft, fontSize: 14 } }, Number(r.rating).toFixed(1))),
+      E("p", { style: { margin: 0, color: c.textSoft, fontSize: 15 } }, reviewExcerpt(r.body)),
+      E("div", { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" } }, E("button", { type: "button", className: smallClass, style: small, onClick: () => { setOpenId(r.id); mmrScrollTop(); } }, "Read the review"), buyBtn(r, false)),
+      adminButtons(r),
+    );
+  }
+
+  return E(
+    "section",
+    { style: { padding: "60px 0" } },
+    E(
+      "div",
+      { className: "mg-container", style: { maxWidth: 1120, margin: "0 auto", padding: "0 32px" } },
+      notice && E("p", { role: "status", style: { background: c.accent, color: c.accentOn, padding: "10px 16px", borderRadius: 4, margin: "0 0 20px", fontSize: 14 } }, notice),
+      open
+        ? detail(open)
+        : E(
+            React.Fragment,
+            null,
+            E(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24, flexWrap: "wrap", marginBottom: 28 } },
+              E("div", null, E("h2", { className: "mg-display", style: { fontSize: 30, margin: 0 } }, "MM Book Review"), E("p", { style: { color: c.textSoft, margin: "6px 0 0", fontSize: 17 } }, "Honest reviews of the books I read, with a link to grab each one.")),
+              isAdmin && !editor && E("button", { type: "button", className: "mmr-press", onClick: startWrite, style: { ...btn, border: "none" } }, "+ Write a review"),
+            ),
+            editorForm(),
+            rows.length > 0 &&
+              E(
+                "div",
+                { style: { display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 28 } },
+                genres.map((g) => E("button", { key: g, type: "button", className: smallClass, "aria-pressed": genre === g, onClick: () => setGenre(g), style: { ...small, borderRadius: 999, padding: "8px 16px", background: genre === g ? c.accent : "transparent", color: genre === g ? c.accentOn : c.textSoft, borderColor: genre === g ? c.accent : c.line } }, g)),
+                E("input", { type: "search", value: query, onChange: (e) => setQuery(e.target.value), placeholder: "Search reviews…", "aria-label": "Search reviews", style: { ...inputStyle, width: 220, marginLeft: "auto", padding: "8px 12px", fontSize: 14 } }),
+              ),
+            loading
+              ? E(
+              "div",
+              { "aria-busy": "true", "aria-label": "Loading reviews", style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 36 } },
+              [0, 1, 2].map((i) =>
+                E(
+                  "div",
+                  { key: i, style: { display: "flex", flexDirection: "column", gap: 12 } },
+                  E("div", { className: "ink-skel", style: { aspectRatio: "2 / 3", borderRadius: 4 } }),
+                  E("div", { className: "ink-skel", style: { height: 18, width: "70%", borderRadius: 4 } }),
+                  E("div", { className: "ink-skel", style: { height: 14, width: "45%", borderRadius: 4 } }),
+                ),
+              ),
+            )
+              : loadError
+                ? E("p", { style: { color: c.danger } }, loadError)
+                : rows.length === 0
+                  ? E("p", { style: { color: c.textFaint, fontSize: 16 } }, isAdmin ? "No reviews yet. Click “+ Write a review” to publish your first one." : "No reviews yet. Check back soon.")
+                  : shown.length === 0
+                    ? E("p", { style: { color: c.textFaint } }, "No reviews match that search.")
+                    : E("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 36 } }, shown.map(card)),
+            disclosure,
+          ),
+    ),
+  );
+}
+
 function FanartPage(props) {
   const {
     c,
@@ -7253,7 +7967,7 @@ function PlainPasswordInput(p) {
         "aria-label": visible ? "Hide password" : "Show password",
         "aria-pressed": visible,
         title: visible ? "Hide password" : "Show password",
-        className: "ink-pw-eye",
+        className: "ink-pw-eye ink-hit",
         style: {
           position: "absolute",
           right: 5,
@@ -7357,6 +8071,9 @@ function BookAuthCard(p) {
           placeholder: p.emailPlaceholder || "Email address",
           "aria-label": p.emailPlaceholder || "Email address",
           autoComplete: p.emailAutoComplete || "email",
+          autoCapitalize: "none",
+          autoCorrect: "off",
+          spellCheck: false,
           value: p.email,
           onChange: p.onEmail,
         }),
@@ -7407,7 +8124,7 @@ function BookAuthCard(p) {
             ),
           ),
         ),
-      p.error && E("p", { className: "ba-error", role: "alert" }, p.error),
+      p.error && E("p", { className: "ba-error ink-shake", role: "alert" }, p.error),
       p.notice && E("p", { className: "ba-notice", role: "status" }, p.notice),
       E(
         "button",
@@ -7998,7 +8715,7 @@ function InkAndSpine() {
           ["home", "Home"],
           ["browse", "Browse the library"],
           ["authors", "Authors"],
-          ["fanart", "Fanart"],
+          ["reviews", "MM Book Review"],
           ["comments", "Comments"],
           ["contact", "Contact"],
           ["privacy-policy", "Privacy Policy"],
@@ -8058,7 +8775,21 @@ function InkAndSpine() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       loginThrottle.fail();
-      setLoginError("Incorrect email or password.");
+      const why = (err && err.message) || "";
+      if (/email not confirmed/i.test(why)) {
+        setLoginError(
+          "This account's email address hasn't been confirmed yet. Open the confirmation email, or confirm the user in Supabase (Authentication > Users).",
+        );
+      } else if (/invalid login credentials/i.test(why)) {
+        setLoginError("Incorrect email or password.");
+      } else if ((err && err.status === 429) || /rate limit|too many/i.test(why)) {
+        setLoginError("Too many sign-in attempts. Please wait a few minutes and try again.");
+      } else if (/failed to fetch|network|load failed/i.test(why)) {
+        setLoginError("Couldn't reach the server. Check your internet connection and try again.");
+      } else {
+        // e.g. the password was right but the account's profile couldn't be loaded
+        setLoginError("Couldn't sign in: " + (why || "unknown error") + ".");
+      }
       setLoginBusy(false);
     }
   }
@@ -8886,6 +9617,8 @@ function InkAndSpine() {
         .ba-has-eye input { padding-right: 52px; }
         .ba-eye { position: absolute; right: 6px; top: 5px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
         .ba-eye:hover { background: rgba(231,223,200,0.1); }
+        .ba-eye { touch-action: manipulation; }
+        .ba-eye::after { content: ""; position: absolute; inset: -4px; }
         .ba-eye:focus-visible { outline: 2px solid #D8B468; outline-offset: 1px; }
         .ba-field .ba-eye svg { position: static; width: 18px; height: 18px; stroke: #E7DFC8; pointer-events: none; }
         .ba-field input:focus-visible { outline: 2px solid #D8B468; outline-offset: 2px; }
@@ -9011,7 +9744,7 @@ function InkAndSpine() {
             { id: "browse", label: "Browse" },
             ...(isAdmin ? [{ id: "upload", label: "Upload" }] : []),
             { id: "authors", label: "Authors" },
-            { id: "fanart", label: "Fanart" },
+            { id: "reviews", label: "MM Reviews" },
             { id: "comments", label: "Comments", badge: comments.length },
             { id: "contact", label: "Contact" },
             ...(isAdmin ? [{ id: "admin", label: "Admin" }] : []),
@@ -9249,7 +9982,7 @@ function InkAndSpine() {
                 "button",
                 {
                   type: "button",
-                  onClick: () => goTo("fanart"),
+                  onClick: () => goTo("reviews"),
                   style: {
                     background: "none",
                     border: `1px solid ${c.line}`,
@@ -9261,7 +9994,7 @@ function InkAndSpine() {
                     cursor: "pointer",
                   },
                 },
-                "Fanart gallery",
+                "MM Book Review",
               ),
             ),
           ),
@@ -9364,22 +10097,22 @@ function InkAndSpine() {
                   gap: 24,
                 },
               },
-              /* @__PURE__ */ React.createElement("h2", { className: "mg-display", style: { fontSize: 26 } }, "Fanart"),
+              /* @__PURE__ */ React.createElement("h2", { className: "mg-display", style: { fontSize: 26 } }, "MM Book Review"),
               /* @__PURE__ */ React.createElement(
                 "p",
                 { style: { color: c.textFaint, fontSize: 15, margin: 0 } },
-                "Art made by readers, for readers.",
+                "Honest reviews of the books I read.",
               ),
             ),
             /* @__PURE__ */ React.createElement(
               "p",
               { style: { color: c.textSoft, fontSize: 16, maxWidth: "52ch", margin: "0 0 22px" } },
-              "Browse illustrations, covers, and tributes — or sign in and submit your own. Fanart lives between Authors and Notes in the menu.",
+              "Read my thoughts on the books I've finished, with a link to pick up each one.",
             ),
             /* @__PURE__ */ React.createElement(
               "button",
-              { type: "button", onClick: () => goTo("fanart"), style: { ...btn, border: "none" } },
-              "Open the Fanart gallery",
+              { type: "button", onClick: () => goTo("reviews"), style: { ...btn, border: "none" } },
+              "Read the reviews",
             ),
           ),
         ),
@@ -10525,7 +11258,6 @@ function InkAndSpine() {
             { style: { display: "flex", gap: 8, marginBottom: 36, borderBottom: `1px solid ${c.line}` } },
             [
               { id: "library", label: "Library" },
-              { id: "fanart", label: "Fanart" },
               { id: "legal", label: "Settings \u203A Legal & Privacy" },
             ].map((t) =>
               E(
@@ -10947,33 +11679,7 @@ function InkAndSpine() {
             ),
         ),
       ),
-    page === "fanart" &&
-      FanartPage({
-        c,
-        btn,
-        inputStyle,
-        readerUser,
-        isAdmin,
-        fanartItems,
-        fanartLoading,
-        fanartError,
-        fanartFilter,
-        setFanartFilter,
-        fanartLightbox,
-        openFanartLightbox,
-        closeFanartLightbox,
-        fanartFormOpen,
-        openFanartComposer,
-        closeFanartComposer,
-        fanartForm,
-        setFanartForm,
-        fanartFormErrors,
-        handleFanartImageChange,
-        submitFanartUpload,
-        fanartSubmitBusy,
-        fanartSubmitSuccess,
-        deleteFanartItem,
-          }),
+    page === "reviews" && E(ReviewsPage, { c, btn, inputStyle, readerUser, isAdmin }),
     page === "not-found" &&
       E(
         "section",
