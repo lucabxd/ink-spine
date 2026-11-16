@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
 <!--
   Content-Security-Policy - scoped to exactly what this page loads.
   script-src uses SHA-256 hashes of this page's inline script tags (React, ReactDOM, the Supabase
@@ -14,7 +15,7 @@
   (form-action), and limits network requests (connect-src) and images (img-src). img-src includes the
   Supabase project domain because book covers are served from Supabase Storage.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-OTtf5+FqDspi89i0sOqGmW1L5zqGeMq3jVBPjQNY1cc=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-xBK8HHl50J5qS2X1dv7ZNxYwGOa2aFiW2yRce5QVpMA=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
 <title>Ink and Spine</title>
 <script>
 /**
@@ -1240,6 +1241,344 @@ function StarRow(p) {
 }
 // Stars under a book cover: they show the average (with the percentage at the end) and can be
 // tapped to rate the book right from the shelf. Tapping a star saves that rating immediately.
+function BookInfoPage(p) {
+  const h = React.createElement;
+  const { book, shelfTitle, c, ratingSummary, readerUser, onClose, onRead, loading, readerOpen, onSignIn } = p;
+  const [open, setOpen] = useState(false);
+  const [descOpen, setDescOpen] = useState(false);
+  const [cmName, setCmName] = useState(null);
+  const [cmText, setCmText] = useState("");
+  const [cmErr, setCmErr] = useState("");
+  const [cmBusy, setCmBusy] = useState(false);
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+  useEffect(() => {
+    if (readerOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [readerOpen, onClose]);
+  const bmKey = "ink-reader-bm-" + slugifyKey(book.title) + "-o";
+  function readBm() {
+    try {
+      const a = JSON.parse(localStorage.getItem(bmKey) || "[]");
+      return Array.isArray(a) ? a.filter((n) => typeof n === "number") : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  const [marked, setMarked] = useState(() => readBm().indexOf(0) !== -1);
+  const [bmNote, setBmNote] = useState("");
+  function toggleMark() {
+    const rest = readBm().filter((n) => n !== 0);
+    const ok = savePref(bmKey, JSON.stringify(marked ? rest : [0].concat(rest)));
+    setMarked(!marked);
+    setBmNote(ok ? "" : "Bookmarks are only kept if you accept preference cookies.");
+  }
+  const canComment = !!(book._isSiteBook && book.id != null);
+  function toggleComments() {
+    const next = !open;
+    setOpen(next);
+    if (next && rows === null && canComment) {
+      const cached = swrRead("comments-" + book.id);
+      if (cached) setRows(cached);
+      setBusy(!cached);
+      setErr("");
+      fetchPageComments(book.id)
+        .then((r) => {
+          swrWrite("comments-" + book.id, r);
+          setRows(r);
+        })
+        .catch(() => {
+          if (!cached) setErr("Comments couldn\u2019t be loaded right now.");
+        })
+        .finally(() => setBusy(false));
+    }
+  }
+  const cmDefaultName = readerUser && readerUser.email ? readerUser.email.split("@")[0] : "";
+  async function submitComment(e) {
+    e.preventDefault();
+    if (cmBusy) return;
+    if (!readerUser) {
+      if (onSignIn) onSignIn();
+      return;
+    }
+    const name = (cmName == null ? cmDefaultName : cmName).trim();
+    const text = cmText.trim();
+    if (!isValidDisplayName(name)) {
+      setCmErr(NAME_ERROR);
+      return;
+    }
+    if (text.length < 2) {
+      setCmErr("Write a little more before posting.");
+      return;
+    }
+    if (text.length > 500) {
+      setCmErr("Please keep comments under 500 characters.");
+      return;
+    }
+    const wait = pageCommentLimiter.take();
+    if (wait) {
+      setCmErr("Slow down \u2014 please wait " + wait + " second" + (wait === 1 ? "" : "s") + " before posting again.");
+      return;
+    }
+    setCmBusy(true);
+    setCmErr("");
+    const clientId = newUuid();
+    const draft = {
+      id: clientId,
+      book_id: String(book.id),
+      user_id: readerUser.id,
+      author_name: name.slice(0, 60),
+      body: text,
+      char_offset: 0,
+    };
+    setRows((list) => (list || []).concat({ ...draft, created_at: new Date().toISOString() }));
+    setCmText("");
+    try {
+      const row = await insertPageComment(draft);
+      setRows((list) => {
+        const next = (list || []).map((x) => (x.id === clientId ? row : x));
+        swrWrite("comments-" + book.id, next);
+        return next;
+      });
+    } catch (err) {
+      if (!(err && err.code === "23505")) {
+        setRows((list) => (list || []).filter((x) => x.id !== clientId));
+        setCmText(text);
+        setCmErr("Couldn\u2019t post your comment. Please try again.");
+      }
+    }
+    setCmBusy(false);
+  }
+  const cmField = {
+    width: "100%",
+    boxSizing: "border-box",
+    background: c.surface,
+    color: c.text,
+    border: "1px solid " + c.line,
+    borderRadius: 8,
+    padding: "10px 12px",
+    fontSize: 15,
+    fontFamily: "inherit",
+  };
+  const mainBtn = {
+    minHeight: 44,
+    padding: "0 10px",
+    width: "100%",
+    boxSizing: "border-box",
+    whiteSpace: "nowrap",
+    borderRadius: 8,
+    border: "none",
+    background: c.accent,
+    color: c.accentOn || "#111",
+    fontFamily: "'Source Serif 4', serif",
+    fontSize: 15,
+    cursor: "pointer",
+  };
+  const note = { color: c.textFaint, fontSize: 14, margin: "10px 0 0" };
+  return h(
+    "div",
+    {
+      role: "dialog",
+      "aria-label": book.title,
+      style: {
+        position: "fixed",
+        inset: 0,
+        zIndex: 150,
+        background: c.bg,
+        color: c.text,
+        overflowY: "auto",
+        fontFamily: "'Source Serif 4', serif",
+        lineHeight: 1.6,
+        paddingTop: "env(safe-area-inset-top, 0px)",
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+      },
+    },
+    h(
+      "div",
+      { style: { maxWidth: 760, margin: "0 auto", padding: "0 16px 40px" } },
+      h(
+        "div",
+        { style: { filter: "drop-shadow(0 4px 6px rgba(0,0,0,0.35))", width: 80, marginLeft: 4, marginBottom: 6 } },
+        h(
+          "button",
+          {
+            type: "button",
+            onClick: onClose,
+            title: "Back to library",
+            "aria-label": "Back to library",
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "flex-start",
+              gap: 3,
+              width: 80,
+              height: 104,
+              minHeight: 104,
+              padding: "14px 4px 0",
+              textAlign: "center",
+              lineHeight: 1.2,
+              border: "none",
+              cursor: "pointer",
+              background: c.accent,
+              color: c.accentOn || "#1a1408",
+              fontFamily: "inherit",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+              clipPath: "polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%)",
+            },
+          },
+          h("svg", { width: 22, height: 22, viewBox: "0 0 24 24", "aria-hidden": "true", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round" }, h("path", { d: "M15 5l-7 7 7 7" })),
+          "Back to library",
+        ),
+      ),
+      h(
+        "div",
+        { style: { display: "flex", gap: 16, alignItems: "flex-start", padding: "8px 0 16px" } },
+        h(
+          "div",
+          { style: { width: "36%", maxWidth: 200, flex: "0 0 auto", aspectRatio: "3 / 4", borderRadius: 6, overflow: "hidden", background: c.spines[0], boxShadow: "0 10px 24px rgba(0,0,0,0.18)" } },
+          book.cover
+            ? h("img", { src: book.cover, alt: book.title + " cover", style: { width: "100%", height: "100%", objectFit: "cover", display: "block" } })
+            : h("div", { style: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 46, color: "rgba(255,255,255,0.55)" } }, book.title[0]),
+        ),
+        h(
+          "div",
+          { style: { minWidth: 0 } },
+          h("h1", { className: "mg-display", style: { fontSize: 24, lineHeight: 1.2, margin: "0 0 8px", overflowWrap: "anywhere" } }, book.title),
+          h("div", { style: { fontSize: 14, color: c.textFaint, lineHeight: 1.8 } }, "Author: " + book.author),
+          shelfTitle && h("div", { style: { fontSize: 14, color: c.textFaint, lineHeight: 1.8 } }, "Shelf: " + shelfTitle),
+          book._isSiteBook &&
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "nowrap" } },
+              h("div", { style: { flex: "1 1 auto", minWidth: 0 } }, h(ShelfRating, { book: book, readerUser: readerUser, summary: ratingSummary, color: c.textFaint, empty: c.line })),
+              h(ShareMenu, {
+                c: c,
+                url: bookShareUrl(book),
+                title: book.title + " by " + book.author,
+                text: "Read \u201c" + book.title + "\u201d by " + book.author + " on Ink and Spine",
+                size: 40,
+                label: "Share this book",
+                wrapStyle: { marginTop: -6 },
+              }),
+            ),
+        ),
+      ),
+      h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 10, margin: "6px 0 12px" } },
+        h("button", { type: "button", onClick: onRead, disabled: loading, style: mainBtn }, loading ? "Opening\u2026" : "Read now"),
+        h(
+          "button",
+          {
+            type: "button",
+            onClick: toggleMark,
+            "aria-pressed": marked,
+            style: { ...mainBtn, background: marked ? c.accent : "none", border: "1px solid " + c.accent, color: marked ? c.accentOn || "#111" : c.accent },
+          },
+          marked ? "Bookmarked" : "Add bookmark",
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            onClick: toggleComments,
+            "aria-expanded": open,
+            "aria-controls": "book-page-comments",
+            style: { ...mainBtn, gridColumn: 1, background: open ? c.accent : "none", border: "1px solid " + c.accent, color: open ? c.accentOn || "#111" : c.accent },
+          },
+          "Comments" + (rows ? " " + rows.length : ""),
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            onClick: () => setDescOpen(!descOpen),
+            "aria-expanded": descOpen,
+            "aria-controls": "book-page-description",
+            style: { ...mainBtn, background: descOpen ? c.accent : "none", border: "1px solid " + c.accent, color: descOpen ? c.accentOn || "#111" : c.accent },
+          },
+          "Description",
+        ),
+      ),
+      bmNote && h("p", { style: { ...note, margin: "0 0 12px" } }, bmNote),
+      descOpen &&
+        h(
+          "div",
+          { id: "book-page-description", style: { marginBottom: 14, borderTop: "1px solid " + c.line, paddingTop: 12 } },
+          book.desc
+            ? h("p", { style: { maxWidth: "62ch", margin: 0, overflowWrap: "anywhere" } }, book.desc)
+            : h("p", { style: { ...note, margin: 0 } }, "No description for this book yet."),
+        ),
+      open &&
+        h(
+          "div",
+          { id: "book-page-comments", style: { marginBottom: 14 } },
+          !canComment && h("p", { style: note }, "Comments are available on books in the library."),
+          busy && h("p", { style: note }, "Loading comments\u2026"),
+          err && h("p", { style: { ...note, color: "#e0716a" } }, err),
+          rows && rows.length === 0 && h("p", { style: note }, "No comments on this book yet. Be the first to write one."),
+          rows &&
+            rows.map((r, i) =>
+              h(
+                "div",
+                { key: r.id != null ? r.id : i, style: { borderTop: "1px solid " + c.line, padding: "12px 0" } },
+                h("b", { style: { fontWeight: 500, fontSize: 14 } }, r.author_name),
+                h("span", { style: { fontSize: 12, color: c.textFaint, marginLeft: 8 } }, new Date(r.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
+                h("p", { style: { margin: "4px 0 0", fontSize: 15, overflowWrap: "anywhere" } }, r.body),
+              ),
+            ),
+          canComment &&
+            !busy &&
+            (readerUser
+              ? h(
+                  "form",
+                  { onSubmit: submitComment, noValidate: true, style: { display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid " + c.line, paddingTop: 12 } },
+                  h("input", {
+                    type: "text",
+                    maxLength: 60,
+                    placeholder: "Your name",
+                    value: cmName == null ? cmDefaultName : cmName,
+                    onChange: (e) => setCmName(e.target.value),
+                    style: cmField,
+                    "aria-label": "Your name",
+                  }),
+                  h("textarea", {
+                    rows: 3,
+                    maxLength: 500,
+                    placeholder: "Write a comment\u2026",
+                    value: cmText,
+                    onChange: (e) => setCmText(e.target.value),
+                    style: { ...cmField, resize: "vertical" },
+                    "aria-label": "Your comment",
+                  }),
+                  h("div", { style: { fontSize: 12, color: c.textFaint } }, cmText.length + " / 500"),
+                  cmErr && h("div", { role: "alert", style: { fontSize: 13, color: "#e0716a" } }, cmErr),
+                  h("button", { type: "submit", disabled: cmBusy, style: { ...mainBtn, width: "auto", alignSelf: "flex-start", padding: "0 18px", opacity: cmBusy ? 0.6 : 1 } }, cmBusy ? "Posting\u2026" : "Post comment"),
+                )
+              : h(
+                  "div",
+                  { style: { borderTop: "1px solid " + c.line, paddingTop: 12 } },
+                  h("p", { style: { ...note, margin: "0 0 10px" } }, "Sign in to leave a comment."),
+                  h("button", { type: "button", onClick: () => onSignIn && onSignIn(), style: { ...mainBtn, width: "auto", padding: "0 18px" } }, "Sign in"),
+                )),
+        ),
+    ),
+  );
+}
 function ShelfRating(p) {
   const bookId = String(p.book.id);
   const rater = useRater(p.readerUser);
@@ -1275,14 +1614,14 @@ function ShelfRating(p) {
   });
   return E(
     "div",
-    { style: { marginTop: 4 } },
+    { className: "mg-rate", style: { marginTop: 4 } },
     E(
       "div",
       { style: { display: "flex", alignItems: "center", gap: 4, fontSize: 14.5, flexWrap: "wrap" } },
       E("span", { style: { display: "inline-flex", marginLeft: -2 } }, stars),
       total
         ? E("span", { style: { whiteSpace: "nowrap" } }, ratingPercent(avg), E("span", { style: { color: p.color, marginLeft: 6 } }, "(" + total + ")"))
-        : E("span", { style: { color: p.color, fontSize: 13 } }, "Tap a star to rate"),
+        : E("span", { className: "mg-rate-hint", style: { color: p.color, fontSize: 13 } }, "Tap a star to rate"),
     ),
     note && E("div", { role: "status", style: { fontSize: 12.5, color: p.color, marginTop: 2 } }, note),
   );
@@ -2007,6 +2346,16 @@ const themeOptions = {
     toolbar: "#0f1115",
     toolbarText: "#dadde4",
     accent: "#8fb2ff",
+  },
+  black: {
+    name: "Black",
+    bg: "#000000",
+    pageBg: "#000000",
+    text: "#d2d2d2",
+    sub: "#808080",
+    toolbar: "#000000",
+    toolbarText: "#d2d2d2",
+    accent: "#d9b86c",
   },
 };
 // The reader's surrounding chrome (toolbars, panels, controls) is a fixed premium dark
@@ -2852,9 +3201,9 @@ function PageScrubBar(props) {
 function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUser, onSignIn }) {
   const [readingTheme, setReadingTheme] = useState(() => {
     try {
-      return localStorage.getItem("ink-reading-theme") || "day";
+      return localStorage.getItem("ink-reading-theme") || "black";
     } catch (err) {
-      return "day";
+      return "black";
     }
   });
   const [zoom, setZoom] = useState(100);
@@ -2965,7 +3314,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
 
   const storageKey = "ink-reader-pos-" + slugifyKey(book.title);
   const bookmarkKey = "ink-reader-bm-" + slugifyKey(book.title);
-  const themeColors = themeOptions[readingTheme];
+  const themeColors = themeOptions[readingTheme] || themeOptions.black;
   // fewer characters per page = each one gets to be bigger (see pageInnerStyle below)
   // Page geometry the text is currently paginated for. It follows the live layout (see the effect
   // near computeGeom below) but only after the size has settled, so resizing doesn't re-flow the
@@ -4290,7 +4639,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
     E(
       "div",
       { style: { display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" } },
-      ["day", "sepia", "night"].map((t) =>
+      ["day", "sepia", "night", "black"].map((t) =>
         E("button", {
           key: t,
           type: "button",
@@ -4399,7 +4748,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
       E(
         "div",
         { style: { display: "flex", flexDirection: "column", gap: 6 } },
-        ["day", "sepia", "night"].map((t) =>
+        ["day", "sepia", "night", "black"].map((t) =>
           E(
             "button",
             {
@@ -4488,6 +4837,21 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
           () => setPageMode((m) => (m === "double" ? "single" : "double")),
           E("span", { style: { fontSize: 11, color: uiColors.textFaint } }, pageMode === "double" ? "On" : "Off"),
         ),
+      E(
+        "div",
+        { className: "ink-more-mobile" },
+        moreItem("search", "Search this book", () => { setSearchOpen((o) => !o); setMoreOpen(false); }),
+        moreItem("bookOpen", "Look up a word", () => { setDictSearchOpen((o) => !o); setVocabOpen(false); setMoreOpen(false); }),
+        hasContent &&
+          moreItem(
+            bookmarks.indexOf(pageIndex) !== -1 ? "bookmarkFilled" : "bookmark",
+            bookmarks.indexOf(pageIndex) !== -1 ? "Remove bookmark" : "Bookmark this page",
+            () => { toggleBookmark(pageIndex); setMoreOpen(false); },
+          ),
+        moreItem("palette", "Reading theme", () => { setThemeMenuOpen((o) => !o); setMoreOpen(false); }),
+        commentsEnabled && moreItem("message", "Comments", (e) => { onCommentsClick(e, true); setMoreOpen(false); }),
+        moreItem("eyeOff", "Hide controls", () => { collapseChrome(); setMoreOpen(false); }),
+      ),
       hasContent && moreItem("download", "Download as text", downloadText),
       moreItem(
         autoHideNav ? "unlock" : "lock",
@@ -5935,7 +6299,15 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
       }
       @media (max-width: 720px) {
         .ink-chrome-toolbar { gap: 2px; }
+        .ink-chrome-toolbar button[title="Search this book"], .ink-chrome-toolbar button[title="Look up a word"], .ink-chrome-toolbar button[title*="ookmark"], .ink-chrome-toolbar button[title="Change reading theme"], .ink-chrome-toolbar button[title="Comments on this page"], .ink-chrome-toolbar button[title*="mmersive"], .ink-chrome-toolbar button[title="Hide navigation controls"], .ink-chrome-top button[title*="ullscreen"] { display: none !important; }
+        .ink-chrome-toolbar button, .ink-chrome-top button { min-width: 44px; min-height: 44px; }
+        .ink-side-arrow { min-width: 44px; min-height: 44px; }
+        .ink-side-arrow[aria-label="Previous page"] { left: max(12px, env(safe-area-inset-left)) !important; }
+        .ink-side-arrow[aria-label="Next page"] { right: max(12px, env(safe-area-inset-right)) !important; }
+        .ink-book-stage { touch-action: pan-y; overscroll-behavior-x: none; }
+        #ink-more-menu input, #ink-more-menu select { font-size: 16px; }
       }
+      @media (min-width: 721px) { .ink-more-mobile { display: none; } }
       ${AUDIO_PLAYER_CSS}
     `,
     ),
@@ -6071,6 +6443,248 @@ function User({ size = 15, color = "currentColor" }) {
     /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "7", r: "4" }),
   );
 }
+// ---------------------------------------------------------------------------
+// Share menu: a round button next to the search bar that fans out social share buttons.
+// Every network is opened with its public "share link" URL, so no third-party script is loaded.
+function bookShareUrl(book) {
+  try {
+    const u = new URL(window.location.href);
+    u.hash = "";
+    u.search = "";
+    u.searchParams.set("book", String(book.id));
+    return u.toString();
+  } catch (e) {
+    return window.location.href;
+  }
+}
+function shareSvg(kind) {
+  const base = { width: 18, height: 18, viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" };
+  const fill = { fill: "currentColor" };
+  const line = { fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round" };
+  const P = (d, extra) => E("path", Object.assign({ d: d }, extra || {}));
+  switch (kind) {
+    case "facebook":
+      return E("svg", Object.assign({}, base, fill), P("M13.6 22v-8.4h2.8l.5-3.4h-3.3V8.1c0-1 .4-1.7 1.8-1.7H17V3.3c-.3 0-1.3-.2-2.5-.2-2.6 0-4.3 1.600-4.300 4.500v2.600H7.400v3.400h2.800V22h3.400z"));
+    case "x":
+      return E("svg", Object.assign({}, base, fill), P("M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"));
+    case "whatsapp":
+      return E("svg", Object.assign({}, base, fill), P("M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"));
+    case "telegram":
+      return E("svg", Object.assign({}, base, fill), P("M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"));
+    case "instagram":
+      return E(
+        "svg",
+        Object.assign({}, base, line),
+        E("rect", { x: 3.2, y: 3.2, width: 17.6, height: 17.6, rx: 5 }),
+        E("circle", { cx: 12, cy: 12, r: 4.1 }),
+        E("circle", { cx: 17.2, cy: 6.8, r: 1, fill: "currentColor", stroke: "none" }),
+      );
+    case "pinterest":
+      return E("svg", Object.assign({}, base, fill), P("M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.162-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.957 1.406-5.957s-.359-.72-.359-1.781c0-1.663.967-2.911 2.168-2.911 1.024 0 1.518.769 1.518 1.688 0 1.029-.653 2.567-.992 3.992-.285 1.193.6 2.165 1.775 2.165 2.128 0 3.768-2.245 3.768-5.487 0-2.861-2.063-4.869-5.008-4.869-3.41 0-5.409 2.562-5.409 5.199 0 1.033.394 2.143.889 2.741.099.12.112.225.085.345-.09.375-.293 1.199-.334 1.363-.053.225-.172.271-.401.165-1.495-.69-2.433-2.878-2.433-4.646 0-3.776 2.748-7.252 7.92-7.252 4.158 0 7.392 2.967 7.392 6.923 0 4.135-2.607 7.462-6.233 7.462-1.214 0-2.354-.629-2.758-1.379l-.749 2.848c-.269 1.045-1.004 2.352-1.498 3.146 1.123.345 2.306.535 3.55.535 6.607 0 11.985-5.365 11.985-11.987C23.97 5.39 18.592.026 11.985.026L12.017 0z"));
+    case "reddit":
+      return E(
+        "svg",
+        Object.assign({}, base, fill),
+        E("ellipse", { cx: 12, cy: 14.2, rx: 7.6, ry: 5.4 }),
+        E("circle", { cx: 4.9, cy: 11.3, r: 2 }),
+        E("circle", { cx: 19.1, cy: 11.3, r: 2 }),
+        E("circle", { cx: 17.6, cy: 4.2, r: 1.6 }),
+        E("path", { d: "M12 8.8l1.1-4.9 4.200 1", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" }),
+        E("circle", { cx: 9.2, cy: 13.4, r: 1.25, fill: "#fff", className: "mg-share-eye" }),
+        E("circle", { cx: 14.8, cy: 13.4, r: 1.25, fill: "#fff", className: "mg-share-eye" }),
+        E("path", { d: "M9.2 16.6c1.700 1.100 4 1.100 5.600 0", fill: "none", stroke: "#fff", strokeWidth: 1.3, strokeLinecap: "round", className: "mg-share-eye-line" }),
+      );
+    case "email":
+      return E("svg", Object.assign({}, base, line), E("rect", { x: 3, y: 5, width: 18, height: 14, rx: 2.5 }), P("M3.5 7.5l8.500 6 8.500-6"));
+    case "copy":
+      return E("svg", Object.assign({}, base, line), P("M10 14a4.500 4.500 0 0 0 6.400 0l3-3a4.500 4.500 0 0 0-6.400-6.400l-1 1"), P("M14 10a4.500 4.500 0 0 0-6.400 0l-3 3a4.500 4.500 0 0 0 6.400 6.400l1-1"));
+    case "more":
+      return E("svg", Object.assign({}, base, line), E("circle", { cx: 5, cy: 12, r: 1.200, fill: "currentColor" }), E("circle", { cx: 12, cy: 12, r: 1.200, fill: "currentColor" }), E("circle", { cx: 19, cy: 12, r: 1.200, fill: "currentColor" }));
+    default:
+      return E(
+        "svg",
+        Object.assign({}, base, line, { width: 20, height: 20 }),
+        E("circle", { cx: 18, cy: 5, r: 3 }),
+        E("circle", { cx: 6, cy: 12, r: 3 }),
+        E("circle", { cx: 18, cy: 19, r: 3 }),
+        P("M8.600 13.500l6.800 4M15.400 6.500l-6.800 4"),
+      );
+  }
+}
+function ShareMenu(p) {
+  const c = p.c;
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const canNative = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  function flash(msg) {
+    setNote(msg);
+    setTimeout(() => setNote(""), 2400);
+  }
+  const url =
+    p.url ||
+    (() => {
+      try {
+        return window.location.href.split("#")[0];
+      } catch (e) {
+        return "";
+      }
+    })();
+  const title = p.title || "Ink and Spine";
+  const text = p.text || "Ink and Spine \u2014 a quiet place to read";
+  const size = p.size || 44;
+  const shareLabel = p.label || "Share this site";
+  const u = encodeURIComponent(url);
+  const t = encodeURIComponent(text);
+  async function copyLink(doneMsg) {
+    const done = typeof doneMsg === "string" ? doneMsg : "Link copied";
+    setOpen(false);
+    try {
+      await navigator.clipboard.writeText(url);
+      flash(done);
+    } catch (e) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        flash(done);
+      } catch (x) {
+        flash("Couldn\u2019t copy \u2014 copy the address from your browser instead.");
+      }
+    }
+  }
+  function shareInstagram() {
+    try {
+      window.open("https://www.instagram.com/direct/inbox/", "_blank", "noopener,noreferrer");
+    } catch (e) {}
+    copyLink("Link copied \u2014 paste it into an Instagram message or story");
+  }
+  function nativeShare() {
+    setOpen(false);
+    try {
+      navigator.share({ title: title, text: text, url: url }).catch(() => {});
+    } catch (e) {}
+  }
+  const items = [
+    { id: "facebook", label: "Share on Facebook", clr: "#1877f2", href: "https://www.facebook.com/sharer/sharer.php?u=" + u },
+    { id: "x", label: "Share on X", clr: "#111111", href: "https://twitter.com/intent/tweet?url=" + u + "&text=" + t },
+    { id: "whatsapp", label: "Share on WhatsApp", clr: "#25d366", href: "https://wa.me/?text=" + encodeURIComponent(text + " " + url) },
+    { id: "telegram", label: "Share on Telegram", clr: "#26a5e4", href: "https://t.me/share/url?url=" + u + "&text=" + t },
+    { id: "instagram", label: "Share on Instagram (copies the link)", clr: "#e4405f", onClick: shareInstagram },
+    { id: "reddit", label: "Share on Reddit", clr: "#ff4500", href: "https://www.reddit.com/submit?url=" + u + "&title=" + t },
+    { id: "pinterest", label: "Share on Pinterest", clr: "#e60023", href: "https://pinterest.com/pin/create/button/?url=" + u + "&description=" + t },
+    { id: "email", label: "Share by email", clr: "#6b7280", href: "mailto:?subject=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(text + "\n" + url) },
+    { id: "copy", label: "Copy link", clr: "#a3762f", onClick: copyLink },
+  ];
+  if (canNative) items.push({ id: "more", label: "More apps (Instagram, TikTok, Snapchat\u2026)", clr: "#7c5cff", onClick: nativeShare });
+  // two arcs fanning out below and to the left of the button
+  const innerN = Math.ceil(items.length / 2);
+  const rings = [
+    { r: 98, list: items.slice(0, innerN) },
+    { r: 152, list: items.slice(innerN) },
+  ];
+  let order = 0;
+  const placed = [];
+  rings.forEach((ring) => {
+    ring.list.forEach((it, j) => {
+      const m = ring.list.length;
+      const deg = 90 + (m === 1 ? 45 : (90 * j) / (m - 1));
+      const rad = (deg * Math.PI) / 180;
+      placed.push({
+        it: it,
+        i: order++,
+        x: Math.round(Math.cos(rad) * ring.r),
+        y: Math.round(Math.sin(rad) * ring.r),
+      });
+    });
+  });
+  return E(
+    "div",
+    { className: "mg-share" + (open ? " is-open" : ""), style: Object.assign({ zIndex: open ? 60 : 1 }, p.wrapStyle || {}) },
+    open && E("div", { onClick: () => setOpen(false), style: { position: "fixed", inset: 0, zIndex: -1 }, "aria-hidden": "true" }),
+    placed.map((pl) => {
+      const it = pl.it;
+      const common = {
+        key: it.id,
+        className: "mg-share-item",
+        title: it.label,
+        "aria-label": it.label,
+        tabIndex: open ? 0 : -1,
+        style: { "--i": pl.i, "--tx": pl.x + "px", "--ty": pl.y + "px", "--clr": it.clr },
+      };
+      return it.href
+        ? E("a", Object.assign({}, common, { href: it.href, target: "_blank", rel: "noopener noreferrer", onClick: () => setOpen(false) }), shareSvg(it.id))
+        : E("button", Object.assign({}, common, { type: "button", onClick: () => it.onClick() }), shareSvg(it.id));
+    }),
+    E(
+      "button",
+      {
+        type: "button",
+        className: "mg-share-toggle",
+        onClick: () => setOpen((o) => !o),
+        "aria-expanded": open,
+        "aria-label": shareLabel,
+        title: shareLabel,
+        style: {
+          position: "relative",
+          zIndex: 5,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: size,
+          height: size,
+          minHeight: size,
+          padding: 0,
+          borderRadius: "50%",
+          background: c.surface,
+          border: "1px solid " + c.line,
+          color: c.accent,
+          cursor: "pointer",
+          transform: open ? "rotate(360deg)" : "none",
+          boxShadow: open ? "0 0 0 2px " + c.accent : "none",
+        },
+      },
+      shareSvg("share"),
+    ),
+    note &&
+      E(
+        "div",
+        {
+          role: "status",
+          style: {
+            position: "fixed",
+            left: "50%",
+            bottom: "calc(24px + env(safe-area-inset-bottom, 0px))",
+            transform: "translateX(-50%)",
+            background: c.surface,
+            color: c.text,
+            border: "1px solid " + c.line,
+            borderRadius: 6,
+            padding: "12px 18px",
+            fontSize: 14,
+            maxWidth: "90vw",
+            zIndex: 900,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+            backgroundColor: "#222",
+            color: "#fff",
+          },
+        },
+        note,
+      ),
+  );
+}
 const PALETTE = {
   dark: {
     bg: "linear-gradient(165deg, #141A30 0%, #1B2340 55%, #232C4D 100%)",
@@ -6086,15 +6700,15 @@ const PALETTE = {
     spines: ["#232C4D", "#2E3763", "#1B2340", "#E7DBC0", "#C9B98F", "#3A4470"],
   },
   light: {
-    bg: "linear-gradient(165deg, #E7DFC8 0%, #E7DFC8 100%)",
-    surface: "#F2ECDA",
-    line: "rgba(30,42,34,0.16)",
-    lineStrong: "rgba(30,42,34,0.28)",
-    text: "#1E2A22",
-    textSoft: "#3F473C",
-    textFaint: "#6B6A57",
-    accent: "#A8763E",
-    accentOn: "#F2ECDA",
+    bg: "linear-gradient(165deg, #FFFFF7 0%, #FFFFF7 100%)",
+    surface: "#5B4030",
+    line: "var(--line)",
+    lineStrong: "var(--line-strong)",
+    text: "var(--ink)",
+    textSoft: "var(--ink-soft)",
+    textFaint: "var(--ink-faint)",
+    accent: "var(--accent)",
+    accentOn: "var(--accent-on)",
     danger: "#A83E3E",
     spines: ["#96432D", "#4F6B54", "#A8763E", "#2E3B2F", "#3F473C", "#7C5726"],
   },
@@ -6196,7 +6810,7 @@ const SHAREABLE_PAGES = [
   { id: "home", label: "Home" },
   { id: "browse", label: "Browse" },
   { id: "authors", label: "Authors" },
-  { id: "reviews", label: "MM Reviews" },
+  { id: "reviews", label: "MM Book Reviews" },
   { id: "comments", label: "Comments" },
   { id: "contact", label: "Contact" },
 ];
@@ -6521,7 +7135,7 @@ function buildCookieSections(cfg) {
   const storageRows = [
     ["Last-read page", "Preferences", "Remembers which page you were on in a book so you can resume reading."],
     ["Bookmarks", "Preferences", "Stores the pages you've chosen to bookmark within a book."],
-    ["Reading theme", "Preferences", "Remembers whether you prefer the Day, Sepia, or Night reading theme."],
+    ["Reading theme", "Preferences", "Remembers whether you prefer the Day, Sepia, Night, or Black reading theme."],
     [
       "Auto-hide preference",
       "Preferences",
@@ -7292,7 +7906,7 @@ function ReviewsPage({ c, btn, inputStyle, isAdmin, readerUser }) {
             E(
               "div",
               { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24, flexWrap: "wrap", marginBottom: 28 } },
-              E("div", null, E("h2", { className: "mg-display", style: { fontSize: 30, margin: 0 } }, "MM Book Review"), E("p", { style: { color: c.textSoft, margin: "6px 0 0", fontSize: 17 } }, "Honest reviews of the books I read, with a link to grab each one.")),
+              E("div", null, E("h2", { className: "mg-display", style: { fontSize: 30, margin: 0 } }, "MM Book Reviews"), E("p", { style: { color: c.textSoft, margin: "6px 0 0", fontSize: 17 } }, "Honest reviews of the books I read, with a link to grab each one.")),
               isAdmin && !editor && E("button", { type: "button", className: "mmr-press", onClick: startWrite, style: { ...btn, border: "none" } }, "+ Write a review"),
             ),
             editorForm(),
@@ -8335,6 +8949,7 @@ function InkAndSpine() {
   const [openBook, setOpenBook] = useState({});
   const [expandedShelves, setExpandedShelves] = useState({});
   const [readingBook, setReadingBook] = useState(null);
+  const [bookPage, setBookPage] = useState(null);
   const [comments, setComments] = useState(INITIAL_COMMENTS);
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
@@ -8500,6 +9115,33 @@ function InkAndSpine() {
     };
   }, []);
 
+  // A shared link looks like  https://yoursite/?book=<id>  - once the shelves have loaded, open that book's page.
+  const deepLinkDone = useRef(false);
+  useEffect(() => {
+    if (deepLinkDone.current) return;
+    let id = "";
+    try {
+      id = new URLSearchParams(window.location.search).get("book") || "";
+    } catch (e) {}
+    if (!id) {
+      deepLinkDone.current = true;
+      return;
+    }
+    for (const shelf of shelves) {
+      const found = shelf.books.find((b) => String(b.id) === id);
+      if (found) {
+        deepLinkDone.current = true;
+        setBookPage(found);
+        try {
+          const u = new URL(window.location.href);
+          u.searchParams.delete("book");
+          history.replaceState(null, "", u.pathname + u.search + u.hash);
+        } catch (e) {}
+        return;
+      }
+    }
+  }, [shelves]);
+
   // Every "open this book" click goes through here so a site book's text -
   // which isn't fetched until someone actually wants to read it, to keep the
   // shelves fast to load - gets pulled from Storage first if needed.
@@ -8638,6 +9280,10 @@ function InkAndSpine() {
     setTimeout(() => setLegalSaved(""), 2500);
   }
   const c = PALETTE[theme];
+  // Tell the browser which scheme the page is using, so phone browsers do not auto-darken the light theme.
+  useEffect(() => {
+    document.documentElement.style.colorScheme = theme === "dark" ? "dark" : "only light";
+  }, [theme]);
   const visibleShelves = useMemo(() => {
     const q = query.trim().toLowerCase();
     return shelves
@@ -8723,7 +9369,7 @@ function InkAndSpine() {
           ["home", "Home"],
           ["browse", "Browse the library"],
           ["authors", "Authors"],
-          ["reviews", "MM Book Review"],
+          ["reviews", "MM Book Reviews"],
           ["comments", "Comments"],
           ["contact", "Contact"],
           ["privacy-policy", "Privacy Policy"],
@@ -9595,6 +10241,13 @@ function InkAndSpine() {
       null,
       `
         .mg-display { font-family: 'Fraunces', serif; font-weight: 500; margin: 0; }
+        ${theme === "light" ? `
+        :root { --ink: #1E2A22; --ink-soft: #3F473C; --ink-faint: #4F4638; --accent: #6F4E37; --accent-on: #F2ECDA; --line: rgba(30,42,34,0.16); --line-strong: rgba(30,42,34,0.28); }
+        [style*="rgb(91, 64, 48)"], .mg-nav { --ink: #F3EAD7; --ink-soft: #E6D9BF; --ink-faint: #CDBB9C; --accent: #D9BD94; --accent-on: #2B1D14; --line: rgba(243,234,215,0.24); --line-strong: rgba(243,234,215,0.4); color: var(--ink); }
+        [style*="rgb(255, 255, 247)"] { --ink: #1E2A22; --ink-soft: #3F473C; --ink-faint: #4F4638; --accent: #6F4E37; --accent-on: #F2ECDA; --line: rgba(30,42,34,0.16); --line-strong: rgba(30,42,34,0.28); color: var(--ink); }
+        .mg-nav .mg-nav-link.is-active, .mg-nav .mg-nav-link.is-active:hover { background: #D9BD94; color: #2B1D14; border-color: #D9BD94; }
+        .mg-nav .mg-nav-link:not(.is-active) { color: #F3EAD7; }
+      ` : ""}
         .mg-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: ${c.surface}; border: 1px solid ${c.line}; border-radius: 999px; padding: 7px 14px 7px 16px; box-shadow: 0 10px 26px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.35); }
         .mg-window-dots { display: flex; align-items: center; gap: 6px; margin-right: 4px; flex-shrink: 0; }
         .mg-window-dots span { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
@@ -9648,9 +10301,21 @@ function InkAndSpine() {
         .ba-pageno { margin-top: 6px; padding-top: 10px; text-align: center; font-size: 14px; font-style: italic; color: #B4B2B0; }
         @media (max-width: 440px) { .ba-book { padding: 26px 24px 14px; } .ba-title { font-size: 30px; } .ba-ribbon { right: 22px; width: 24px; height: 50px; } }
         .mg-pill { transition: background .15s ease, color .15s ease, border-color .15s ease; }
+        .mg-theme-toggle { min-height: 44px; }
+        .mg-search-input::placeholder { color: currentColor; opacity: 0.62; }
+        .mg-share { position: relative; flex: 0 0 auto; }
+        .mg-share-toggle { transition: transform .6s ease, box-shadow .3s ease; }
+        .mg-share-item { position: absolute; top: 50%; left: 50%; width: 36px; height: 36px; min-width: 36px; min-height: 36px !important; margin: -18px 0 0 -18px; padding: 0; border: none; border-radius: 50% !important; background: #fff; color: #333; display: flex; align-items: center; justify-content: center; text-decoration: none; cursor: pointer; box-shadow: 0 6px 16px rgba(0,0,0,0.35); transform: translate(0, 0) scale(0.3); opacity: 0; visibility: hidden; transition: transform .45s cubic-bezier(.34,1.56,.64,1) calc(var(--i) * 35ms), opacity .25s ease calc(var(--i) * 35ms), background .15s ease, color .15s ease, visibility 0s linear .5s; }
+        .mg-share.is-open .mg-share-item { transform: translate(var(--tx), var(--ty)) scale(1); opacity: 1; visibility: visible; transition: transform .45s cubic-bezier(.34,1.56,.64,1) calc(var(--i) * 35ms), opacity .25s ease calc(var(--i) * 35ms), background .15s ease, color .15s ease, visibility 0s; }
+        .mg-share-toggle, .mg-share-item { corner-shape: round !important; }
+        .mg-share-item:hover, .mg-share-item:focus-visible { background: var(--clr); color: #fff; outline: none; }
+        .mg-share-item .mg-share-eye { fill: #fff; }
+        .mg-share-item:not(:hover):not(:focus-visible) .mg-share-eye { fill: #fff; }
+        @media (prefers-reduced-motion: reduce) { .mg-share-toggle, .mg-share-item { transition: none !important; } }
+        .mg-search-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
         @media (max-width: 760px) {
-          .mg-container { padding-left: 18px !important; padding-right: 18px !important; }
-          .mg-hero { grid-template-columns: 1fr !important; padding: 44px 18px 52px !important; }
+          .mg-container { padding-left: 16px !important; padding-right: 16px !important; }
+          .mg-hero { grid-template-columns: 1fr !important; padding: 44px 16px 52px !important; }
           .mg-reading-card { grid-template-columns: 1fr !important; text-align: left; padding: 20px !important; gap: 18px !important; }
           .mg-header-wrap { flex-direction: column; align-items: stretch !important; gap: 14px !important; padding-top: 4px !important; padding-bottom: 4px !important; }
           .mg-header-right { width: 100%; justify-content: space-between; gap: 10px !important; }
@@ -9705,6 +10370,51 @@ function InkAndSpine() {
           .mmr-aside { order: -1; flex: 1 1 100% !important; }
           .mmr-aside .mmr-cover { max-width: 170px; }
         }
+        /* ---- phone pass 2 ---- */
+        @media (max-width: 760px) {
+          html, body { overflow-x: hidden; max-width: 100%; }
+          header.mg-site-header { position: sticky !important; top: 0; padding: 6px 0 !important; }
+          .mg-header-wrap { gap: 6px !important; padding-top: 0 !important; padding-bottom: 0 !important; }
+          .mg-header-deco { display: none !important; }
+          .mg-header-wrap { flex-direction: row !important; flex-wrap: wrap !important; align-items: center !important; justify-content: space-between !important; }
+          .mg-header-right { display: contents !important; }
+          .mg-brand { order: 0; margin-right: auto; }
+          .mg-header-right > :not(.mg-search-row) { order: 1; }
+          nav.mg-nav { order: 5; flex: 1 1 100% !important; width: 100% !important; }
+          .mg-search-box { order: 6 !important; flex: 1 1 100% !important; padding: 0 12px !important; height: 44px; min-height: 44px; box-sizing: border-box; }
+          .mg-search-box input { min-height: 0 !important; height: 40px; }
+          .mg-search-row { order: 6 !important; flex: 1 1 100% !important; }
+          .mg-search-row > .mg-search-box { order: 0 !important; flex: 1 1 auto !important; min-width: 0; }
+          .mg-search-row > .mg-share { order: 1; }
+          .mg-brand { align-items: flex-start !important; }
+          header .mg-display { font-size: 16px !important; letter-spacing: 0.08em !important; }
+          nav.mg-nav { gap: 16px !important; }
+          .mg-nav-link { min-height: 44px; }
+          .mg-header-right button { min-height: 44px; }
+          .mg-hero h1, .mg-hero .mg-display { font-size: clamp(28px, 9vw, 44px) !important; overflow-wrap: anywhere; }
+          .mg-book-wrap button { min-height: 44px; }
+          .mg-shelf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 20px 14px !important; }
+          .mg-book-wrap { min-width: 0; overflow-wrap: anywhere; }
+          .mg-upload-form > div:first-child, [style*="150px 1fr"] > div:first-child { max-width: 180px; }
+          [style*="150px 1fr"] { grid-template-columns: 1fr !important; }
+          div[style*="z-index: 500"] { padding: 12px !important; }
+          form[style*="max-width: 680px"] { margin: 0 !important; padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px)) !important; max-height: calc(100dvh - 24px); overflow-y: auto; }
+          form[style*="max-width: 680px"] button, .mg-upload-form button { width: 100%; min-height: 44px; }
+          input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=file]), select { min-height: 44px; }
+          [style*="2fr 1fr 1fr auto"] { display: flex !important; flex-direction: column; align-items: stretch !important; gap: 6px !important; }
+          [style*="2fr 1fr 1fr auto"][style*="uppercase"] { display: none !important; }
+          [style*="2fr 1fr 1fr auto"] button { min-height: 44px; }
+          [style*="2fr 1fr 1fr auto"] > div { display: flex; flex-wrap: wrap; gap: 8px; }
+          .mg-admin-table, .mg-admin-table tbody, .mg-admin-table tr, .mg-admin-table td { display: block; width: 100%; box-sizing: border-box; }
+          .mg-admin-table thead { display: none; }
+          .mg-admin-table tr { padding: 12px 14px; border-bottom: 1px solid rgba(127,127,127,0.25); }
+          .mg-admin-table td { padding: 3px 0 !important; border: 0 !important; }
+          .mg-admin-table td > div { display: flex; flex-wrap: wrap; gap: 8px; }
+          .mg-admin-table button { min-height: 44px; }
+        }
+        @media (max-width: 479px) {
+          .mg-shelf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 20px 14px !important; }
+        }
       `,
     ),
     /* @__PURE__ */ React.createElement(
@@ -9737,7 +10447,7 @@ function InkAndSpine() {
         },
         /* @__PURE__ */ React.createElement(
           "div",
-          { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 } },
+          { className: "mg-brand", style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 } },
           /* @__PURE__ */ React.createElement(
             "div",
             { style: { display: "flex", alignItems: "center", gap: 10 } },
@@ -9767,7 +10477,7 @@ function InkAndSpine() {
           ),
           /* @__PURE__ */ React.createElement(
             "div",
-            { style: { display: "flex", alignItems: "center", gap: 8, width: "100%" } },
+            { className: "mg-header-deco", style: { display: "flex", alignItems: "center", gap: 8, width: "100%" } },
             /* @__PURE__ */ React.createElement("div", { style: { flex: 1, height: 1, background: c.lineStrong } }),
             /* @__PURE__ */ React.createElement(
               "span",
@@ -9792,7 +10502,7 @@ function InkAndSpine() {
             { id: "browse", label: "Browse" },
             ...(isAdmin ? [{ id: "upload", label: "Upload" }] : []),
             { id: "authors", label: "Authors" },
-            { id: "reviews", label: "MM Reviews" },
+            { id: "reviews", label: "MM Book Reviews" },
             { id: "comments", label: "Comments", badge: comments.length },
             { id: "contact", label: "Contact" },
             ...(isAdmin ? [{ id: "admin", label: "Admin" }] : []),
@@ -9869,6 +10579,9 @@ function InkAndSpine() {
               ),
           /* @__PURE__ */ React.createElement(
             "div",
+            { className: "mg-search-row" },
+            /* @__PURE__ */ React.createElement(
+            "div",
             {
               className: "mg-search-box",
               style: {
@@ -9910,34 +10623,31 @@ function InkAndSpine() {
               IS_MAC ? "\u2318K" : "Ctrl K",
             ),
           ),
+            E(ShareMenu, { c: c }),
+          ),
           /* @__PURE__ */ React.createElement(
             "button",
             {
               type: "button",
               onClick: () => setTheme((t) => (t === "dark" ? "light" : "dark")),
+              className: "mg-theme-toggle",
               style: {
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
+                justifyContent: "center",
+                width: 44,
+                height: 44,
                 background: c.surface,
                 border: `1px solid ${c.line}`,
-                color: c.textSoft,
-                fontFamily: "'Source Serif 4', serif",
-                fontSize: 14,
-                padding: "8px 14px",
-                borderRadius: 20,
+                padding: 0,
+                borderRadius: "50%",
                 cursor: "pointer",
+                color: c.accent,
               },
-              "aria-label": "Switch between light and dark mode",
+              title: theme === "dark" ? "Switch to light mode" : "Switch to dark mode",
+              "aria-label": theme === "dark" ? "Switch to light mode" : "Switch to dark mode",
             },
-            theme === "dark"
-              ? /* @__PURE__ */ React.createElement(Sun, { size: 15 })
-              : /* @__PURE__ */ React.createElement(Moon, { size: 15 }),
-            /* @__PURE__ */ React.createElement(
-              "span",
-              { className: "mg-theme-label" },
-              theme === "dark" ? "Light mode" : "Dark mode",
-            ),
+            /* @__PURE__ */ React.createElement(theme === "dark" ? Moon : Sun, { size: 20 }),
           ),
           isAdmin
             ? /* @__PURE__ */ React.createElement(
@@ -10042,7 +10752,7 @@ function InkAndSpine() {
                     cursor: "pointer",
                   },
                 },
-                "MM Book Review",
+                "MM Book Reviews",
               ),
             ),
           ),
@@ -10145,7 +10855,7 @@ function InkAndSpine() {
                   gap: 24,
                 },
               },
-              /* @__PURE__ */ React.createElement("h2", { className: "mg-display", style: { fontSize: 26 } }, "MM Book Review"),
+              /* @__PURE__ */ React.createElement("h2", { className: "mg-display", style: { fontSize: 26 } }, "MM Book Reviews"),
               /* @__PURE__ */ React.createElement(
                 "p",
                 { style: { color: c.textFaint, fontSize: 15, margin: 0 } },
@@ -10264,7 +10974,7 @@ function InkAndSpine() {
               ),
               /* @__PURE__ */ React.createElement(
                 "div",
-                { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 22 } },
+                { className: "mg-shelf-grid", style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 22 } },
                 shownBooks.map((book, i) =>
                   /* @__PURE__ */ React.createElement(
                     "div",
@@ -10277,7 +10987,7 @@ function InkAndSpine() {
                         onMouseEnter: () => prefetchBookText(book),
                         onFocus: () => prefetchBookText(book),
                         onTouchStart: () => prefetchBookText(book),
-                        onClick: () => handleOpenBook(book),
+                        onClick: () => setBookPage(book),
                         "aria-busy": openBookLoadingId === book.id ? "true" : "false",
                       },
                       /* @__PURE__ */ React.createElement(
@@ -10314,6 +11024,7 @@ function InkAndSpine() {
                         /* @__PURE__ */ React.createElement(
                           "span",
                           {
+                            className: "mg-badge",
                             style: {
                               position: "absolute",
                               top: 9,
@@ -10331,12 +11042,12 @@ function InkAndSpine() {
                       ),
                       /* @__PURE__ */ React.createElement(
                         "div",
-                        { className: "mg-display", style: { marginTop: 11, fontSize: 20, lineHeight: 1.3 } },
+                        { className: "mg-display mg-book-title", style: { marginTop: 11, fontSize: 16, lineHeight: 1.3 } },
                         book.title,
                       ),
                       /* @__PURE__ */ React.createElement(
                         "div",
-                        { style: { fontSize: 16.5, color: c.textFaint, marginTop: 3 } },
+                        { className: "mg-book-author", style: { fontSize: 14, color: c.textFaint, marginTop: 3 } },
                         book.author,
                       ),
                     ),
@@ -10348,7 +11059,7 @@ function InkAndSpine() {
                         color: c.textFaint,
                         empty: c.line,
                       }),
-                    book.desc &&
+                    false &&
                       E(
                         "div",
                         { className: "mg-desc-wrap" },
@@ -11520,7 +12231,7 @@ function InkAndSpine() {
                       },
                       E(
                         "table",
-                        { style: { width: "100%", borderCollapse: "collapse", fontSize: 14 } },
+                        { className: "mg-admin-table", style: { width: "100%", borderCollapse: "collapse", fontSize: 14 } },
                         E(
                           "thead",
                           null,
@@ -12394,6 +13105,19 @@ function InkAndSpine() {
         },
         rateNotice,
       ),
+    bookPage &&
+      E(BookInfoPage, {
+        book: bookPage,
+        shelfTitle: (shelves.find((s) => s.books.some((b) => b.title === bookPage.title)) || {}).title,
+        c: c,
+        ratingSummary: ratingSummaries[String(bookPage.id)],
+        readerUser: readerUser,
+        onClose: () => setBookPage(null),
+        onSignIn: () => openReaderAuth("signin"),
+        onRead: () => handleOpenBook(bookPage),
+        loading: openBookLoadingId === bookPage.id,
+        readerOpen: !!readingBook,
+      }),
     readingBook &&
       E(BookReader, {
         book: readingBook,
