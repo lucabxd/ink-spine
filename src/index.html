@@ -15,7 +15,7 @@
   (form-action), and limits network requests (connect-src) and images (img-src). img-src includes the
   Supabase project domain because book covers are served from Supabase Storage.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-xBK8HHl50J5qS2X1dv7ZNxYwGOa2aFiW2yRce5QVpMA=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-k2WCbqrYJKd2ZEgC1Wry3gcQV2IHuwifaHtxAAMhepA=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
 <title>Ink and Spine</title>
 <script>
 /**
@@ -404,6 +404,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     .ink-sheet-overlay { align-items: flex-end !important; padding: 0 !important; }
     .ink-sheet { max-width: none !important; border-radius: 20px 20px 0 0 !important; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)) !important; }
     .ink-comments-sheet { top: auto !important; right: 0 !important; left: 0 !important; bottom: 0 !important; width: auto !important; max-height: 75vh !important; border-radius: 20px 20px 0 0 !important; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
+    .ink-font-sheet { top: auto !important; right: 0 !important; left: 0 !important; bottom: 0 !important; width: auto !important; max-height: 62vh !important; border-radius: 20px 20px 0 0 !important; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
   }
 
   /* tap targets: a larger invisible hit area around small controls on touch screens */
@@ -684,6 +685,34 @@ function ToastHost() {
 // Swipe-down-to-dismiss for bottom sheets. Spread onto a drag-handle element that is the
 // first child of the sheet; it moves the sheet directly (no re-renders), so a drag can be
 // released or grabbed again at any moment and the spring-back is an interruptible transition.
+// ---------------------------------------------------------------------------
+// Reader fonts. The reader's choice is saved on that reader's own device (localStorage).
+// "web" fonts come from Google Fonts and only load after the reader accepts optional cookies
+// (see FONTS_URL); the two "device" fonts need no download and always work.
+const READER_FONTS = [
+  { id: "source", name: "Source Serif", stack: "'Source Serif 4', Georgia, serif", tag: "Default", web: true },
+  { id: "literata", name: "Literata", stack: "'Literata', Georgia, serif", tag: "Made for long reading", web: true },
+  { id: "lora", name: "Lora", stack: "'Lora', Georgia, serif", tag: "Warm and bookish", web: true },
+  { id: "merriweather", name: "Merriweather", stack: "'Merriweather', Georgia, serif", tag: "Sturdy on small screens", web: true },
+  { id: "atkinson", name: "Atkinson Hyperlegible", stack: "'Atkinson Hyperlegible', system-ui, sans-serif", tag: "Easy to tell letters apart", web: true },
+  { id: "lexend", name: "Lexend", stack: "'Lexend', system-ui, sans-serif", tag: "Designed for reading ease", web: true },
+  { id: "georgia", name: "Georgia", stack: "Georgia, 'Times New Roman', serif", tag: "Your device, instant", web: false },
+  { id: "sans", name: "Device sans", stack: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif", tag: "Your device, instant", web: false },
+];
+const READER_FONT_KEY = "ink-reader-font";
+function readerFontById(id) {
+  return READER_FONTS.filter((f) => f.id === id)[0] || READER_FONTS[0];
+}
+function loadReaderFont() {
+  try {
+    return readerFontById(localStorage.getItem(READER_FONT_KEY)).id;
+  } catch (err) {
+    return READER_FONTS[0].id;
+  }
+}
+// the page-splitting code reads this, so the pages are measured in the font that is drawn
+let readerFontStack = READER_FONTS[0].stack;
+
 function swipeDismissHandle(onClose) {
   let startY = 0;
   let dy = 0;
@@ -2282,7 +2311,7 @@ function loadOptionalStyle(href) {
   document.head.appendChild(el);
 }
 const FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;1,8..60,400&display=swap";
+  "https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;1,8..60,400&family=Atkinson+Hyperlegible:wght@400;700&family=Lexend:wght@400&family=Literata:opsz,wght@7..72,400&family=Lora:wght@400&family=Merriweather:wght@400&display=swap";
 const PDFJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
 const MAMMOTH_SRC = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
 const CONSENT_LIB_MESSAGE =
@@ -2830,7 +2859,7 @@ function paginateByHeight(text, g, book) {
     probe = document.createElement("div");
     probe.setAttribute("aria-hidden", "true");
     probe.style.cssText =
-      "position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;box-sizing:content-box;white-space:pre-wrap;margin:0;padding:0;border:0;font-family:'Source Serif 4', serif;";
+      "position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;box-sizing:content-box;white-space:pre-wrap;margin:0;padding:0;border:0;font-family:" + readerFontStack + ";";
     probe.style.lineHeight = lh + "px";
     probe.style.width = g.w + "px";
     probe.style.fontSize = g.font + "px";
@@ -2859,7 +2888,7 @@ function paginateByHeight(text, g, book) {
       const tb = document.createElement("div");
       tb.style.cssText = "white-space:normal;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid #000;";
       const h2 = document.createElement("h2");
-      h2.style.cssText = "font-family:'Source Serif 4', serif;font-size:27px;margin:0 0 4px;";
+      h2.style.cssText = "font-family:" + readerFontStack + ";font-size:27px;margin:0 0 4px;";
       h2.textContent = (book && book.title) || "";
       const au = document.createElement("div");
       au.style.cssText = "font-size:16px;";
@@ -3335,7 +3364,13 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
     return { w: G0.w, h: G0.h, font: G0.font, lineH: G0.lineH, padX: G0.padX, padY: G0.padY, padB: G0.padB };
   });
   const [fontEpoch, setFontEpoch] = useState(0);
-  const pageData = useMemo(() => paginateByHeight(book.content, pagGeom, book), [book.content, pagGeom, fontEpoch]);
+  const [readerFont, setReaderFont] = useState(loadReaderFont);
+  const [fontSheetOpen, setFontSheetOpen] = useState(false);
+  readerFontStack = readerFontById(readerFont).stack;
+  const pageData = useMemo(
+    () => paginateByHeight(book.content, pagGeom, book),
+    [book.content, pagGeom, fontEpoch, readerFont],
+  );
   const pages = pageData.pages;
   const pageStarts = pageData.starts;
   const savedPage = pageForOffset(pageStarts, savedOffset);
@@ -3354,6 +3389,32 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
     setSearchMatches([]);
     setSearchActive(0);
   }
+  // remember the reader's font, and re-flow once that font has really loaded (the page is measured with it)
+  useEffect(() => {
+    try {
+      localStorage.setItem(READER_FONT_KEY, readerFont);
+    } catch (err) {}
+    if (!document.fonts || !document.fonts.load) return;
+    let alive = true;
+    const family = readerFontById(readerFont).stack.split(",")[0];
+    document.fonts.load("16px " + family).then(
+      () => {
+        if (alive) setFontEpoch((n) => n + 1);
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [readerFont]);
+  useEffect(() => {
+    if (!fontSheetOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setFontSheetOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fontSheetOpen]);
   // text measurements depend on the web font, so re-flow once it has actually loaded
   useEffect(() => {
     if (!document.fonts) return;
@@ -3930,6 +3991,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
       padding: g.padY + "px " + g.padX + "px " + g.padB + "px",
       overflow: "hidden",
       fontSize: g.font,
+      fontFamily: readerFontStack,
       lineHeight: g.lineH + "px",
       color: themeColors.text,
       textAlign: hasContent ? "left" : "center",
@@ -3964,7 +4026,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
         E(
           "div",
           { style: { marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid " + themeColors.sub + "55" } },
-          E("h2", { style: { fontFamily: "'Source Serif 4', serif", fontSize: 27, margin: "0 0 4px" } }, book.title),
+          E("h2", { style: { fontFamily: readerFontStack, fontSize: 27, margin: "0 0 4px" } }, book.title),
           E("div", { style: { fontSize: 16, color: themeColors.sub } }, book.author),
         ),
       E("div", { style: { whiteSpace: "pre-wrap" } }, renderPageBody(text, idx)),
@@ -4877,6 +4939,29 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
       "div",
       { style: panelStyle(240) },
       E("div", { style: panelHeadStyle }, "Settings"),
+      E(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 2px", marginBottom: 10 } },
+        E(
+          "div",
+          null,
+          E("div", { style: { fontSize: 13, color: uiColors.text } }, "Reading font"),
+          E("div", { style: { fontSize: 11, color: uiColors.textFaint, marginTop: 2 } }, readerFontById(readerFont).name),
+        ),
+        E(
+          "button",
+          {
+            type: "button",
+            "aria-label": "Change reading font",
+            onClick: () => {
+              setSettingsOpen(false);
+              setFontSheetOpen(true);
+            },
+            style: tb({ padding: "6px 12px", fontSize: 12 }),
+          },
+          "Change",
+        ),
+      ),
       E(
         "div",
         {
@@ -6066,6 +6151,141 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
         ),
     );
 
+  // "Aa" button that sits right above the comment button while the toolbars are hidden, so readers
+  // can change the font without leaving the page.
+  const fontBtnEl =
+    !navVisible &&
+    E(
+      "button",
+      {
+        className: "ink-reveal-font",
+        type: "button",
+        onClick: (e) => {
+          e.stopPropagation();
+          setFontSheetOpen((o) => !o);
+        },
+        title: "Reading font and text size",
+        "aria-label": "Reading font and text size",
+        "aria-expanded": fontSheetOpen,
+        style: {
+          position: "absolute",
+          right: 14,
+          bottom: commentsEnabled ? 104 : 60,
+          zIndex: 40,
+          width: 36,
+          height: 36,
+          borderRadius: "50%",
+          border: "1px solid rgba(127,127,127,0.35)",
+          background: fontSheetOpen ? "#D8B468" : themeColors.toolbar,
+          color: fontSheetOpen ? "#211a0c" : themeColors.toolbarText,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 0,
+          boxShadow: "0 8px 22px rgba(0,0,0,0.28)",
+        },
+      },
+      E(
+        "span",
+        { style: { fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 600, fontSize: 15, letterSpacing: "-0.04em", lineHeight: 1 } },
+        "A",
+        E("span", { style: { fontSize: 11 } }, "a"),
+      ),
+    );
+
+  const fontSheetEl =
+    fontSheetOpen &&
+    E(
+      "div",
+      {
+        className: "ink-font-sheet",
+        role: "dialog",
+        "aria-label": "Reading font",
+        onClick: (e) => e.stopPropagation(),
+        style: Object.assign({}, panelStyle(330), {
+          zIndex: 50,
+          maxHeight: "72vh",
+          overflowY: "auto",
+          fontFamily: "'Inter', system-ui, sans-serif",
+        }),
+      },
+      E("div", Object.assign({ className: "ink-sheet-handle", "aria-hidden": true }, swipeDismissHandle(() => setFontSheetOpen(false)))),
+      E(
+        "div",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
+        E("strong", { style: { fontSize: 13 } }, "Reading font"),
+        E("button", { type: "button", onClick: () => setFontSheetOpen(false), style: tb(), "aria-label": "Close reading font" }, "✕"),
+      ),
+      E(
+        "div",
+        { role: "radiogroup", "aria-label": "Font", style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 } },
+        READER_FONTS.map((f) => {
+          const on = f.id === readerFont;
+          return E(
+            "button",
+            {
+              key: f.id,
+              type: "button",
+              role: "radio",
+              "aria-checked": on,
+              onClick: () => setReaderFont(f.id),
+              style: {
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: 2,
+                padding: "10px 12px",
+                minHeight: 64,
+                textAlign: "left",
+                borderRadius: 10,
+                cursor: "pointer",
+                color: uiColors.text,
+                background: "rgba(127,127,127,0.1)",
+                border: "1px solid " + (on ? uiColors.accent : uiColors.border),
+                boxShadow: on ? "inset 0 0 0 1px " + uiColors.accent : "none",
+              },
+            },
+            E("span", { style: { fontFamily: f.stack, fontSize: 22, lineHeight: 1.1 } }, "Aa"),
+            E("span", { style: { fontSize: 12 } }, f.name),
+            E("span", { style: { fontSize: 10.5, color: uiColors.accent } }, f.tag),
+          );
+        }),
+      ),
+      E(
+        "div",
+        { style: { marginTop: 14 } },
+        E("div", { style: panelHeadStyle }, "Text size"),
+        E(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: 10 } },
+          E(
+            "button",
+            { type: "button", "aria-label": "Smaller text", disabled: zoom <= 70, onClick: () => setZoom((z) => Math.max(70, z - 10)), style: tb({ width: 44, height: 44, borderRadius: 10, fontSize: 16 }, zoom <= 70) },
+            "A−",
+          ),
+          E("span", { style: { minWidth: 52, textAlign: "center", fontSize: 13, color: uiColors.textSoft } }, zoom + "%"),
+          E(
+            "button",
+            { type: "button", "aria-label": "Larger text", disabled: zoom >= 200, onClick: () => setZoom((z) => Math.min(200, z + 10)), style: tb({ width: 44, height: 44, borderRadius: 10, fontSize: 16 }, zoom >= 200) },
+            "A+",
+          ),
+        ),
+      ),
+      !thirdPartyAllowed() &&
+        E(
+          "p",
+          { style: { fontSize: 11.5, color: uiColors.textFaint, margin: "12px 0 0" } },
+          "The web fonts load after you accept optional cookies. Georgia and Device sans work right away.",
+        ),
+      readerFont !== "source" &&
+        E(
+          "button",
+          { type: "button", onClick: () => setReaderFont("source"), style: tb({ marginTop: 12, padding: "8px 14px", fontSize: 12.5 }) },
+          "Back to the default font",
+        ),
+    );
+
   const revealBtnEl =
     !navVisible &&
     E(
@@ -6343,6 +6563,8 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
       sideArrowsEl,
       endRatingEl,
       commentBtnEl,
+      fontBtnEl,
+      fontSheetEl,
       revealBtnEl,
       homeBtnEl,
     ),
