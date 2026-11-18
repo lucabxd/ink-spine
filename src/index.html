@@ -15,7 +15,7 @@
   (form-action), and limits network requests (connect-src) and images (img-src). img-src includes the
   Supabase project domain because book covers are served from Supabase Storage.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-9GojD1efWkP9F05rSR6HaRNnqNVPxKZDEPjzCzxiBgY=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-EJfjQLr/PZZTO03AqLt8qkTx6YwQFCTxJC30H4FTItg=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
 <title>Ink and Spine</title>
 <!-- Third-party library: React (unmodified). Do not edit. -->
 <script>
@@ -8786,6 +8786,8 @@ function InkAndSpine() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadStage, setUploadStage] = useState("");
   const [readerProfile, setReaderProfile] = useState(null);
+  // becomes true once we know whether someone is signed in (and, if so, whether they are an admin)
+  const [authChecked, setAuthChecked] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [loginError, setLoginError] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
@@ -8807,7 +8809,9 @@ function InkAndSpine() {
       if (user)
         fetchReaderProfile(user.id)
           .then((p) => !cancelled && setReaderProfile(p))
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => !cancelled && setAuthChecked(true));
+      else setAuthChecked(true);
     });
     const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
       const user = session ? session.user : null;
@@ -8979,6 +8983,11 @@ function InkAndSpine() {
   const isAdmin = !!(readerUser && readerProfile && readerProfile.role === "admin");
   const isAdminRef = useRef(false);
   isAdminRef.current = isAdmin;
+  // Someone who is not an admin must never be left on a blank admin page (for example after opening
+  // yoursite/#admin directly): once we know they are not signed in as admin, show the admin sign-in.
+  useEffect(() => {
+    if (authChecked && !isAdmin && (page === "admin" || page === "upload")) setPage("admin-login");
+  }, [authChecked, isAdmin, page]);
 
   const adminActivityRef = useRef(Date.now());
   const [adminTab, setAdminTab] = useState("library");
@@ -10034,7 +10043,20 @@ function InkAndSpine() {
         },
         E(
           "div",
-          { className: "mg-brand", style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 } },
+          {
+            className: "mg-brand",
+            role: "link",
+            tabIndex: 0,
+            "aria-label": "Ink and Spine - go to the home page",
+            onClick: () => goTo("home"),
+            onKeyDown: (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                goTo("home");
+              }
+            },
+            style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: "pointer" },
+          },
           E(
             "div",
             { style: { display: "flex", alignItems: "center", gap: 10 } },
