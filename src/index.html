@@ -15,7 +15,7 @@
   (form-action), and limits network requests (connect-src) and images (img-src). img-src includes the
   Supabase project domain because book covers are served from Supabase Storage.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-EJfjQLr/PZZTO03AqLt8qkTx6YwQFCTxJC30H4FTItg=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-pc46veN/7rKd+nh3I2KZOACW+7mw/suBFVlgdJwEADE=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
 <title>Ink and Spine</title>
 <!-- Third-party library: React (unmodified). Do not edit. -->
 <script>
@@ -740,30 +740,83 @@ function swipeDismissHandle(onClose) {
   };
 }
 
-// Back gesture / back button closes an open overlay (reader, sheet) instead of leaving the page.
+// ---------------------------------------------------------------------------
+// Back gesture / back button. Every open overlay (book page, reader, a menu or sheet, a sign-in
+// window...) adds one history entry, so the phone's own back swipe (iOS edge swipe, Android back
+// gesture), the browser Back button and the keyboard Back key close the NEWEST overlay first and
+// never throw the visitor off the site. Overlays opened on top of each other close one at a time.
+const backStack = []; // open overlays, oldest first: { id, close, stale }
+let backCurrent = null; // the overlay marker of the history entry we are standing on (null = a normal page)
+let backIgnore = 0; // popstate events caused by our own history.go()
+let backListening = false;
+function backEntered() {
+  if (backListening) return;
+  backListening = true;
+  window.addEventListener("popstate", (e) => {
+    const left = backCurrent; // the entry we just moved away from
+    backCurrent = (e.state && e.state.inkOverlay) || null;
+    if (backIgnore > 0) {
+      backIgnore--;
+      return;
+    }
+    // only leaving the newest overlay's entry means "close it" ("Forward" and page changes do not)
+    const top = backStack[backStack.length - 1];
+    if (!top || left !== top.id) return;
+    backStack.pop();
+    top.close();
+    // entries that were closed from the inside while something sat on top of them are still in the
+    // history: step over them too, so one back swipe never lands on an invisible "dead" screen
+    let skip = 0;
+    while (backStack.length && backStack[backStack.length - 1].stale) {
+      backStack.pop();
+      skip++;
+    }
+    if (skip) {
+      backIgnore++;
+      try {
+        history.go(-skip);
+      } catch (err) {
+        backIgnore--;
+      }
+    }
+  });
+}
 function useBackToClose(open, onClose) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
-    let popped = false;
-    const marker = { inkOverlay: Date.now() + Math.random() };
+    const entry = { id: Date.now() + "-" + Math.random(), close: () => closeRef.current(), stale: false };
     try {
-      history.pushState(marker, "");
+      history.pushState({ inkOverlay: entry.id }, "");
     } catch (err) {
       return;
     }
-    function onPop() {
-      popped = true;
-      closeRef.current();
-    }
-    window.addEventListener("popstate", onPop);
+    backEntered();
+    backCurrent = entry.id;
+    backStack.push(entry);
     return () => {
-      window.removeEventListener("popstate", onPop);
-      if (!popped) {
-        try {
-          if (history.state && history.state.inkOverlay === marker.inkOverlay) history.back();
-        } catch (err) {}
+      const at = backStack.indexOf(entry);
+      if (at === -1) return; // the back gesture already closed it
+      if (at < backStack.length - 1) {
+        entry.stale = true; // something is open on top: its history entry is removed with that one
+        return;
+      }
+      // it was the newest: remove it (and any stale ones under it) from the history as well
+      backStack.pop();
+      let steps = 1;
+      while (backStack.length && backStack[backStack.length - 1].stale) {
+        backStack.pop();
+        steps++;
+      }
+      try {
+        // only when we are still standing on it: after the page changed, leave the history alone
+        if (history.state && history.state.inkOverlay === entry.id) {
+          backIgnore++;
+          history.go(-steps);
+        }
+      } catch (err) {
+        backIgnore = Math.max(0, backIgnore - 1);
       }
     };
   }, [open]);
@@ -2137,6 +2190,11 @@ function ReviewsPage({ c, btn, inputStyle, isAdmin, readerUser }) {
   const [editor, setEditor] = useState(null); // null, or { id, coverPath, form, errors, busy, saveError }
   const [confirmId, setConfirmId] = useState(null);
   const [notice, setNotice] = useState("");
+  // back swipe goes from a review (or the editor) back to the list of reviews
+  useBackToClose(openId != null || !!editor, () => {
+    setOpenId(null);
+    setEditor(null);
+  });
 
   async function load() {
     setLoading(true);
@@ -3250,7 +3308,7 @@ function computeGeom(o) {
   const viewportW = o.winW;
   const immersiveLayout = o.immersiveMode || !o.navVisible || o.isFullscreen;
   const layoutW = o.stageW || viewportW;
-  const layoutH = o.stageH || Math.max(240, o.winH - (o.isFullscreen ? 0 : o.navVisible ? 118 : 8));
+  const layoutH = o.stageH || Math.max(240, o.winH - (o.isFullscreen ? 0 : o.navVisible ? 118 : 66));
   const fullBleed = o.isFullscreen || o.fillScreen; // page runs edge to edge: no gutter, shadow or rounded corners
   const gutter = fullBleed ? 0 : immersiveLayout ? 6 : 10;
   const availW = Math.max(120, layoutW - gutter * 2);
@@ -4077,6 +4135,19 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
     showContinue ||
     themeMenuOpen ||
     settingsOpen;
+  // the panels and sheets inside the reader share one back-gesture step (back closes them first)
+  useBackToClose(searchOpen || bookmarksOpen || dictOpen || dictSearchOpen || vocabOpen || commentsOpen || themeMenuOpen || settingsOpen || fontSheetOpen || moreOpen, () => {
+    setSearchOpen(false);
+    setBookmarksOpen(false);
+    setDictOpen(false);
+    setDictSearchOpen(false);
+    setVocabOpen(false);
+    setCommentsOpen(false);
+    setThemeMenuOpen(false);
+    setSettingsOpen(false);
+    setFontSheetOpen(false);
+    setMoreOpen(false);
+  });
   const wantChromeHidden = chromeCollapsed || (autoHideNav && idleHidden);
   const navVisible = !wantChromeHidden || edgeReveal;
   // in fullscreen the bars are always "laid out" and simply slide in and out over the page
@@ -4433,7 +4504,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
     if (!readerRef.current) return;
     const rect = readerRef.current.getBoundingClientRect();
     const y = e.clientY;
-    const nearEdge = y - rect.top < 64 || rect.bottom - y < 72;
+    const nearEdge = y - rect.top < 64 || (edgeReveal && rect.bottom - y < 72); // no bottom peek: the strip lives there
     if (ignoreEdgeUntilLeaveRef.current) {
       if (!nearEdge) ignoreEdgeUntilLeaveRef.current = false;
       return;
@@ -6442,47 +6513,6 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
     pageMode === "double" && fsSpreadEnd > pageIndex + 1
       ? "Pages " + (pageIndex + 1) + "\u2013" + fsSpreadEnd + " of " + totalPages
       : "Page " + (pageIndex + 1) + " of " + totalPages;
-  const miniPageEl =
-    !navVisible &&
-    hasContent &&
-    E(
-      "div",
-      {
-        className: "ink-mini-page",
-        style: isFullscreen
-          ? {
-              position: "absolute",
-              left: "50%",
-              bottom: 12,
-              transform: "translateX(-50%)",
-              fontSize: 11.5,
-              letterSpacing: 0.3,
-              color: themeColors.sub,
-              opacity: 0.9,
-              whiteSpace: "nowrap",
-              fontFamily: "'Inter', system-ui, sans-serif",
-              fontVariantNumeric: "tabular-nums",
-              pointerEvents: "none",
-              zIndex: 30,
-            }
-          : {
-              position: "absolute",
-              left: "50%",
-              bottom: 22,
-              transform: "translateX(-50%)",
-              fontSize: 12,
-              letterSpacing: 0.4,
-              color: themeColors.sub,
-              background: themeColors.toolbar + "cc",
-              padding: "5px 12px",
-              borderRadius: 999,
-              pointerEvents: "none",
-              zIndex: 30,
-            },
-      },
-      isFullscreen ? fsPageLabel : pageIndex + 1 + " / " + totalPages,
-    );
-
   const fsHintEl =
     isFullscreen &&
     fsHint &&
@@ -6574,112 +6604,6 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
         soft: themeColors.toolbarText,
         faint: themeColors.sub || themeColors.toolbarText,
       }),
-    );
-
-  // Comment button that sits right above the round "show navigation" button, so comments stay
-  // reachable while the toolbars are hidden (immersive / fullscreen reading).
-  const commentBtnEl =
-    !navVisible &&
-    commentsEnabled &&
-    E(
-      "button",
-      {
-        className: "ink-reveal-comments",
-        type: "button",
-        onClick: (e) => {
-          e.stopPropagation();
-          onCommentsClick(e, true);
-        },
-        title: "Comments on this page",
-        "aria-label": "Comments on this page",
-        "aria-expanded": commentsOpen,
-        style: {
-          position: "absolute",
-          right: 14,
-          bottom: 60,
-          zIndex: 40,
-          width: 36,
-          height: 36,
-          borderRadius: "50%",
-          border: "1px solid rgba(127,127,127,0.35)",
-          background: commentsOpen ? "#D8B468" : themeColors.toolbar,
-          color: commentsOpen ? "#211a0c" : themeColors.toolbarText,
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 0,
-          boxShadow: "0 8px 22px rgba(0,0,0,0.28)",
-        },
-      },
-      Icon("message", 17),
-      visibleComments.length > 0 &&
-        E(
-          "span",
-          {
-            style: {
-              position: "absolute",
-              top: -5,
-              right: -5,
-              minWidth: 16,
-              height: 16,
-              padding: "0 4px",
-              boxSizing: "border-box",
-              borderRadius: 8,
-              background: "#D8B468",
-              color: "#211a0c",
-              fontSize: 10.5,
-              fontWeight: 700,
-              lineHeight: "16px",
-              textAlign: "center",
-              fontFamily: "'Inter', system-ui, sans-serif",
-            },
-          },
-          visibleComments.length > 99 ? "99+" : visibleComments.length,
-        ),
-    );
-
-  // "Aa" button that sits right above the comment button while the toolbars are hidden, so readers
-  // can change the font without leaving the page.
-  const fontBtnEl =
-    !navVisible &&
-    E(
-      "button",
-      {
-        className: "ink-reveal-font",
-        type: "button",
-        onClick: (e) => {
-          e.stopPropagation();
-          setFontSheetOpen((o) => !o);
-        },
-        title: "Reading font and text size",
-        "aria-label": "Reading font and text size",
-        "aria-expanded": fontSheetOpen,
-        style: {
-          position: "absolute",
-          right: 14,
-          bottom: commentsEnabled ? 104 : 60,
-          zIndex: 40,
-          width: 36,
-          height: 36,
-          borderRadius: "50%",
-          border: "1px solid rgba(127,127,127,0.35)",
-          background: fontSheetOpen ? "#D8B468" : themeColors.toolbar,
-          color: fontSheetOpen ? "#211a0c" : themeColors.toolbarText,
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 0,
-          boxShadow: "0 8px 22px rgba(0,0,0,0.28)",
-        },
-      },
-      E(
-        "span",
-        { style: { fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 600, fontSize: 15, letterSpacing: "-0.04em", lineHeight: 1 } },
-        "A",
-        E("span", { style: { fontSize: 11 } }, "a"),
-      ),
     );
 
   const fontSheetEl =
@@ -6774,82 +6698,6 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
         ),
     );
 
-  const revealBtnEl =
-    !navVisible &&
-    E(
-      "button",
-      {
-        className: "ink-reveal-nav",
-        onClick: (e) => {
-          e.stopPropagation();
-          expandChrome();
-        },
-        title: immersiveMode ? "Exit immersive mode" : "Show navigation",
-        "aria-label": immersiveMode ? "Exit immersive mode" : "Show navigation",
-        style: {
-          position: "absolute",
-          right: 14,
-          bottom: 16,
-          zIndex: 40,
-          width: 36,
-          height: 36,
-          borderRadius: "50%",
-          border: "1px solid rgba(127,127,127,0.35)",
-          background: themeColors.toolbar,
-          color: themeColors.toolbarText,
-          cursor: "pointer",
-          fontSize: 16,
-          lineHeight: 1,
-          boxShadow: "0 8px 22px rgba(0,0,0,0.28)",
-        },
-      },
-      "\u25C0",
-    );
-
-  // Home button: the mirror of the round "show navigation" button, on the opposite side of the
-  // page. It appears whenever the toolbars are hidden (immersive / fullscreen reading), so a
-  // reader can leave the book without first bringing the menus back.
-  const homeBtnEl =
-    !navVisible &&
-    E(
-      "button",
-      {
-        className: "ink-home-btn",
-        type: "button",
-        onClick: (e) => {
-          e.stopPropagation();
-          if (document.fullscreenElement) {
-            try {
-              const p = document.exitFullscreen();
-              if (p && p.catch) p.catch(() => {});
-            } catch (err) {}
-          }
-          onClose();
-        },
-        title: "Back to library",
-        "aria-label": "Back to library",
-        style: {
-          position: "absolute",
-          left: 14,
-          bottom: 16,
-          zIndex: 40,
-          width: 36,
-          height: 36,
-          borderRadius: "50%",
-          border: "1px solid rgba(127,127,127,0.35)",
-          background: themeColors.toolbar,
-          color: themeColors.toolbarText,
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 0,
-          boxShadow: "0 8px 22px rgba(0,0,0,0.28)",
-        },
-      },
-      Icon("home", 17),
-    );
-
   // Always-visible page arrows at the sides of the book (they stay put in immersive and
   // fullscreen modes, where the top bar's arrows are hidden). They sit in the margin next to
   // the book when there is room, and overlay the page edge when the book fills the screen.
@@ -6898,6 +6746,192 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
     );
   }
   const sideArrowsEl = hasContent ? [sideArrow("prev"), sideArrow("next")] : null;
+
+  // Reader strip: while the menus are tucked away, every button lives in one bar under the page, so
+  // nothing ever sits on top of the text. Left: back to library + previous page. Middle: page count.
+  // Right: next page, reading font, comments and "show the menus".
+  const stripSize = winSize.w < 360 ? 34 : winSize.w < 520 ? 40 : 42;
+  function stripBtn(key, props, ...children) {
+    const { className, active, disabled, style: extra, ...rest } = props;
+    return E(
+      "button",
+      {
+        key: key,
+        type: "button",
+        className: "ink-strip-btn " + (className || ""),
+        disabled: disabled,
+        ...rest,
+        style: {
+          position: "relative",
+          flex: "0 0 auto",
+          width: stripSize,
+          height: stripSize,
+          padding: 0,
+          borderRadius: "50%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          border: "1px solid rgba(127,127,127,0.35)",
+          background: active ? "#D8B468" : "rgba(127,127,127,0.14)",
+          color: active ? "#211a0c" : themeColors.toolbarText,
+          cursor: disabled ? "default" : "pointer",
+          opacity: disabled ? 0.3 : 1,
+          ...extra,
+        },
+      },
+      ...children,
+    );
+  }
+  function leaveBook() {
+    if (document.fullscreenElement) {
+      try {
+        const p = document.exitFullscreen();
+        if (p && p.catch) p.catch(() => {});
+      } catch (err) {}
+    }
+    onClose();
+  }
+  const stripCounter =
+    pageMode === "double" && fsSpreadEnd > pageIndex + 1
+      ? pageIndex + 1 + "\u2013" + fsSpreadEnd + " / " + totalPages
+      : pageIndex + 1 + " / " + totalPages;
+  const prevOff = pageIndex <= 0;
+  const nextOff = pageIndex + step() >= totalPages;
+  // in fullscreen the strip always keeps its place (the menus slide over it) so the page never resizes
+  const readStripEl =
+    (!navVisible || isFullscreen) &&
+    E(
+      "div",
+      {
+        className: "ink-read-strip",
+        "aria-hidden": navVisible,
+        style: {
+          flex: "0 0 auto",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 6,
+          padding: "7px 12px",
+          boxSizing: "border-box",
+          background: themeColors.toolbar,
+          color: themeColors.toolbarText,
+          borderTop: "1px solid rgba(127,127,127,0.3)",
+          fontFamily: "'Inter', system-ui, sans-serif",
+        },
+      },
+      E(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: 6 } },
+        stripBtn("home", { className: "ink-home-btn", onClick: leaveBook, title: "Back to library", "aria-label": "Back to library" }, Icon("home", 17)),
+        hasContent &&
+          stripBtn(
+            "prev",
+            { onClick: goPrev, disabled: prevOff, title: "Previous page", "aria-label": "Previous page" },
+            Icon("chevronLeft", 18),
+          ),
+      ),
+      hasContent &&
+        E(
+          "div",
+          {
+            role: "status",
+            "aria-label": fsPageLabel,
+            style: {
+              flex: "1 1 auto",
+              textAlign: "center",
+              fontSize: 12.5,
+              letterSpacing: 0.3,
+              opacity: 0.85,
+              whiteSpace: "nowrap",
+              fontVariantNumeric: "tabular-nums",
+            },
+          },
+          stripCounter,
+        ),
+      E(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: 6 } },
+        hasContent &&
+          stripBtn(
+            "next",
+            { onClick: goNext, disabled: nextOff, title: "Next page", "aria-label": "Next page" },
+            Icon("chevronRight", 18),
+          ),
+        stripBtn(
+          "font",
+          {
+            className: "ink-reveal-font",
+            active: fontSheetOpen,
+            onClick: (e) => {
+              e.stopPropagation();
+              setFontSheetOpen((o) => !o);
+            },
+            title: "Reading font and text size",
+            "aria-label": "Reading font and text size",
+            "aria-expanded": fontSheetOpen,
+          },
+          E(
+            "span",
+            { style: { fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 600, fontSize: 15, letterSpacing: "-0.04em", lineHeight: 1 } },
+            "A",
+            E("span", { style: { fontSize: 11 } }, "a"),
+          ),
+        ),
+        commentsEnabled &&
+          stripBtn(
+            "comments",
+            {
+              className: "ink-reveal-comments",
+              active: commentsOpen,
+              onClick: (e) => {
+                e.stopPropagation();
+                onCommentsClick(e, true);
+              },
+              title: "Comments on this page",
+              "aria-label": "Comments on this page",
+              "aria-expanded": commentsOpen,
+            },
+            Icon("message", 17),
+            visibleComments.length > 0 &&
+              E(
+                "span",
+                {
+                  style: {
+                    position: "absolute",
+                    top: -5,
+                    right: -5,
+                    minWidth: 16,
+                    height: 16,
+                    padding: "0 4px",
+                    boxSizing: "border-box",
+                    borderRadius: 8,
+                    background: "#D8B468",
+                    color: "#211a0c",
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    lineHeight: "16px",
+                    textAlign: "center",
+                  },
+                },
+                visibleComments.length > 99 ? "99+" : visibleComments.length,
+              ),
+          ),
+        stripBtn(
+          "nav",
+          {
+            className: "ink-reveal-nav",
+            onClick: (e) => {
+              e.stopPropagation();
+              expandChrome();
+            },
+            title: immersiveMode ? "Exit immersive mode" : "Show navigation",
+            "aria-label": immersiveMode ? "Exit immersive mode" : "Show navigation",
+            style: { fontSize: 16, lineHeight: 1 },
+          },
+          "\u25C0",
+        ),
+      ),
+    );
 
   return E(
     "div",
@@ -6955,7 +6989,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
       }
       .ink-book-stage { transition: padding 0.48s cubic-bezier(.4,.12,.2,1); min-height: 0; }
       .ink-reader.is-immersive .ink-book-stage { background: transparent; }
-      .ink-mini-page, .ink-reveal-nav, .ink-home-btn { animation: inkFadeIn 0.45s ease; }
+      .ink-read-strip { animation: inkFadeIn 0.35s ease; }
 
       /* Fullscreen (Play Books style): the header and footer float over the page and slide
          in and out, so the page itself never resizes when the menus come and go */
@@ -6979,8 +7013,9 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
         80% { opacity: 1; transform: translate(-50%, 0); }
         100% { opacity: 0; transform: translate(-50%, 0); }
       }
-      .ink-reveal-nav:hover, .ink-home-btn:hover { transform: scale(1.06); }
-      .ink-home-btn:focus-visible, .ink-reveal-nav:focus-visible { outline: 2px solid ${uiColors.accent}; outline-offset: 2px; }
+      .ink-strip-btn { transition: transform 0.15s ease, filter 0.15s ease; }
+      .ink-strip-btn:hover:not(:disabled) { transform: scale(1.06); filter: brightness(1.12); }
+      .ink-strip-btn:focus-visible { outline: 2px solid ${uiColors.accent}; outline-offset: 2px; }
       .ink-side-arrow { transition: opacity 0.15s ease, filter 0.15s ease; }
       .ink-side-arrow:hover:not(:disabled) { opacity: 1 !important; filter: brightness(1.15); }
       .ink-side-arrow:focus-visible { outline: 2px solid ${uiColors.accent}; outline-offset: 2px; }
@@ -7047,15 +7082,11 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
       navVisible && themeMenuEl,
       navVisible && moreMenuEl,
       navVisible && settingsPanelEl,
-      miniPageEl,
-      sideArrowsEl,
+      navVisible && sideArrowsEl,
       endRatingEl,
-      commentBtnEl,
-      fontBtnEl,
       fontSheetEl,
-      revealBtnEl,
-      homeBtnEl,
     ),
+    readStripEl,
     !isFullscreen && bottomBarEl,
     isFullscreen &&
       E(
@@ -7181,6 +7212,14 @@ function shareSvg(kind) {
       return E("svg", Object.assign({}, base, fill), P("M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"));
     case "telegram":
       return E("svg", Object.assign({}, base, fill), P("M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"));
+    case "discord":
+      return E(
+        "svg",
+        Object.assign({}, base, fill),
+        P(
+          "M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z",
+        ),
+      );
     case "instagram":
       return E(
         "svg",
@@ -7281,6 +7320,12 @@ function ShareMenu(p) {
     } catch (e) {}
     copyLink("Link copied \u2014 paste it into an Instagram message or story");
   }
+  function shareDiscord() {
+    try {
+      window.open("https://discord.com/channels/@me", "_blank", "noopener,noreferrer");
+    } catch (e) {}
+    copyLink("Link copied \u2014 paste it into a Discord message");
+  }
   function nativeShare() {
     setOpen(false);
     try {
@@ -7292,15 +7337,16 @@ function ShareMenu(p) {
     { id: "x", label: "Share on X", clr: "#111111", href: "https://twitter.com/intent/tweet?url=" + u + "&text=" + t },
     { id: "whatsapp", label: "Share on WhatsApp", clr: "#25d366", href: "https://wa.me/?text=" + encodeURIComponent(text + " " + url) },
     { id: "telegram", label: "Share on Telegram", clr: "#26a5e4", href: "https://t.me/share/url?url=" + u + "&text=" + t },
+    { id: "discord", label: "Share on Discord (copies the link)", clr: "#5865f2", onClick: shareDiscord },
     { id: "instagram", label: "Share on Instagram (copies the link)", clr: "#e4405f", onClick: shareInstagram },
     { id: "reddit", label: "Share on Reddit", clr: "#ff4500", href: "https://www.reddit.com/submit?url=" + u + "&title=" + t },
     { id: "pinterest", label: "Share on Pinterest", clr: "#e60023", href: "https://pinterest.com/pin/create/button/?url=" + u + "&description=" + t },
     { id: "email", label: "Share by email", clr: "#6b7280", href: "mailto:?subject=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(text + "\n" + url) },
     { id: "copy", label: "Copy link", clr: "#a3762f", onClick: copyLink },
   ];
-  if (canNative) items.push({ id: "more", label: "More apps (Instagram, TikTok, Snapchat\u2026)", clr: "#7c5cff", onClick: nativeShare });
+  if (canNative) items.push({ id: "more", label: "More apps (TikTok, Snapchat\u2026)", clr: "#7c5cff", onClick: nativeShare });
   // two arcs fanning out below and to the left of the button
-  const innerN = Math.ceil(items.length / 2);
+  const innerN = Math.floor(items.length / 2);
   const rings = [
     { r: 98, list: items.slice(0, innerN) },
     { r: 152, list: items.slice(innerN) },
@@ -9089,7 +9135,10 @@ function InkAndSpine() {
       return;
     }
     try {
-      if (window.location.hash.replace(/^#\/?/, "") !== nextPage) history.pushState(null, "", "#" + nextPage);
+      if (window.location.hash.replace(/^#\/?/, "") !== nextPage) {
+        history.pushState(null, "", "#" + nextPage);
+        backCurrent = null; // now standing on a normal page entry
+      }
     } catch (err) {}
     setMissingPath("");
     // client-side route guard: these two pages are admin-only. This is a UI convenience,
@@ -9103,9 +9152,12 @@ function InkAndSpine() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   const [cmdOpen, setCmdOpen] = useState(false);
-  // back button / back swipe closes the reader and the cookie sheet instead of leaving the page
+  // the back swipe / back button closes the newest overlay (newest first) instead of leaving the site
+  useBackToClose(!!bookPage, () => setBookPage(null));
   useBackToClose(!!readingBook, () => setReadingBook(null));
+  useBackToClose(readerAuthOpen, () => setReaderAuthOpen(false));
   useBackToClose(cookiePrefsOpen, () => setCookiePrefsOpen(false));
+  useBackToClose(cmdOpen, () => setCmdOpen(false));
   // Cmd/Ctrl+K opens the command menu; "/" jumps to the search box
   useEffect(() => {
     function onKey(e) {
