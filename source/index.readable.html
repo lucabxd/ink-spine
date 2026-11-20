@@ -24,7 +24,7 @@
   (form-action), and limits network requests (connect-src) and images (img-src). img-src includes the
   Supabase project domain because book covers are served from Supabase Storage.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-J+huUInzN8sKnktYPXXkiDg7C/z3NF/g/ycuVm/g3H4=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3BKl/65YOZ5ieT768z/qZDi2MWwb6nth6J2UcbCGrkI=' 'sha256-GDNFfiCPtuiMNvFh2rAToMkwzAriuzRPEIi+zU9DxQA=' 'sha256-mi77sEKFNvL85Pk/3r8oTcwqca9u/rYmKkBe3F2Ad/U=' 'sha256-6Tj0Fpf0kg5DVyiFK8cAy8m3nJkJUbo8vmmfl1Iga4M=' https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://koyzsxvwdxsvxiriyvtp.supabase.co; media-src 'self' blob:; connect-src 'self' https://api.dictionaryapi.dev https://cdnjs.cloudflare.com https://koyzsxvwdxsvxiriyvtp.supabase.co wss://koyzsxvwdxsvxiriyvtp.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
 <title>Ink and Spine</title>
 <!-- Third-party library: React (unmodified). Do not edit. -->
 <script>
@@ -449,6 +449,76 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 <script>const { useState, useMemo, useRef, useEffect } = React;
 const E = React.createElement; // every screen is written as E("tag", props, ...children)
 
+// ---------------------------------------------------------------------------
+// Speed and reliability helpers
+// ---------------------------------------------------------------------------
+var searchTimer; // delays in-book search while you are still typing
+var inFlight = {}; // requests already running, so the same one is never sent twice at once
+var edgeTouch = null; // where a swipe from the left screen edge started
+
+// Go back one step: close the open overlay through the browser history if there is one, otherwise close it directly.
+function goBackOrClose(close) {
+  try {
+    if (history.state && history.state.inkOverlay) {
+      history.back();
+      return;
+    }
+  } catch (err) {}
+  if (close) close();
+}
+
+// fetch() that gives up after `ms` milliseconds (15 seconds unless told otherwise) instead of hanging forever.
+function inkFetch(url, options, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms || 15000);
+  options = Object.assign({}, options || {});
+  const callerSignal = options.signal;
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  options.signal = controller.signal;
+  return fetch(url, options).finally(() => clearTimeout(timer));
+}
+
+// The fetch used by the Supabase clients: 30 second timeout, except for file uploads, which may take longer.
+function inkSbFetch(input, options) {
+  const url = typeof input === "string" ? input : (input && input.url) || "";
+  const isUpload = /\/storage\/v1\/object\//.test(url) && options && options.method && options.method !== "GET";
+  return isUpload ? fetch(input, options) : inkFetch(input, options, 30000);
+}
+
+// If the same request (same key) is already running, share its result instead of starting another.
+function once(key, start) {
+  return inFlight[key] || (inFlight[key] = start().finally(() => { delete inFlight[key]; }));
+}
+
+// Re-encode a JPEG/PNG cover as a smaller WebP (longest side at most `max` pixels). Falls back to the original.
+async function toWebpDataUrl(dataUrl, max) {
+  max = max || 1000;
+  try {
+    if (!/^data:image\/(jpeg|png)/i.test(dataUrl)) return dataUrl;
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = dataUrl;
+    });
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+    if (!w || !h) return dataUrl;
+    const scale = Math.min(1, max / Math.max(w, h));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    const out = canvas.toDataURL("image/webp", 0.82);
+    return out.indexOf("data:image/webp") === 0 && out.length < dataUrl.length ? out : dataUrl;
+  } catch (err) {
+    return dataUrl;
+  }
+}
+
 // ===========================================================================
 // MAP OF THIS FILE - search for the "// ------" headings to jump between parts.
 //    1. Supabase connection, password and name rules, rate limits
@@ -480,6 +550,7 @@ const SUPABASE_ANON_KEY =
 // The login token lives in sessionStorage (cleared when the tab closes) rather than localStorage,
 // which shortens how long a stolen token stays useful.
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { fetch: inkSbFetch },
   auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
 });
 
@@ -834,6 +905,301 @@ function useBackToClose(open, onClose) {
   }, [open]);
 }
 
+// ---------------------------------------------------------------------------
+// Dropdown helpers: keyboard control for small popup menus, and a form dropdown field.
+// ---------------------------------------------------------------------------
+
+// Keyboard control for a popup menu while it is open: the first item gets focus, Up / Down / Home / End move
+// between items, and Escape closes the menu and puts focus back on the button that opened it.
+// (Enter and Space already work because the items are real buttons.)
+function useMenuKeyboard(open, menuId, onClose, triggerId) {
+  useEffect(() => {
+    if (!open) return;
+    const menuItems = () => {
+      const menu = document.getElementById(menuId);
+      const all = menu ? Array.prototype.slice.call(menu.querySelectorAll('[role^="menuitem"]:not(:disabled)')) : [];
+      return all.filter((el) => el.getClientRects().length > 0); // skip items hidden at this screen size
+    };
+    const first = menuItems()[0];
+    if (first) first.focus({ preventScroll: true });
+    function onKey(e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation(); // do not let Escape also close the whole reader behind the menu
+        onClose();
+        return;
+      }
+      const list = menuItems();
+      if (!list.length) return;
+      const at = list.indexOf(document.activeElement);
+      let next;
+      if (e.key === "ArrowDown") next = (at + 1) % list.length;
+      else if (e.key === "ArrowUp") next = at <= 0 ? list.length - 1 : at - 1;
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = list.length - 1;
+      else return;
+      e.preventDefault();
+      e.stopPropagation(); // arrow keys move through the menu instead of turning the page
+      list[next].focus();
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      const trigger = triggerId && document.querySelector("#" + triggerId + " button");
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (trigger && lost) trigger.focus({ preventScroll: true });
+    };
+  }, [open]);
+}
+
+// A dropdown field for forms. options = [{ value, label, group? }].
+// Up to 10 options it is a native <select> (best on phones) with a large tap target, a visible arrow and hover
+// feedback. With more than 10 it becomes a searchable list that opens upward when there is no room below.
+const SELECT_SEARCH_MIN = 10;
+function SelectBox({ id, label, value, onChange, options, colors, panelBg, style }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const [flipUp, setFlipUp] = useState(false);
+  const wrapRef = useRef(null);
+  const searchRef = useRef(null);
+  const listRef = useRef(null);
+  const searchable = options.length > SELECT_SEARCH_MIN;
+  const fieldStyle = Object.assign(
+    {
+      background: colors.surface,
+      border: `1px solid ${colors.line}`,
+      color: colors.text,
+      fontFamily: "'Source Serif 4', serif",
+      fontSize: 15,
+      borderRadius: 2,
+      width: "100%",
+    },
+    style,
+    { minHeight: 48, boxSizing: "border-box", padding: "10px 42px 10px 14px", cursor: "pointer", textAlign: "left", appearance: "none", WebkitAppearance: "none" },
+  );
+  const caret = E(
+    "svg",
+    {
+      width: 16,
+      height: 16,
+      viewBox: "0 0 24 24",
+      "aria-hidden": "true",
+      style: {
+        position: "absolute",
+        right: 14,
+        top: "50%",
+        pointerEvents: "none",
+        color: colors.textFaint,
+        transform: "translateY(-50%)" + (open ? " rotate(180deg)" : ""),
+        transition: "transform 150ms ease",
+      },
+    },
+    E("path", { d: "M6 9l6 6 6-6", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }),
+  );
+
+  const needle = query.trim().toLowerCase();
+  const shown = options.filter((o) => !needle || o.label.toLowerCase().indexOf(needle) !== -1);
+  const at = Math.min(active, Math.max(0, shown.length - 1));
+  const current = options.filter((o) => o.value === value)[0];
+
+  useEffect(() => {
+    if (!open) return;
+    if (searchRef.current) searchRef.current.focus();
+    function onDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [open]);
+  useEffect(() => {
+    const row = open && listRef.current && listRef.current.querySelector('[data-active="true"]');
+    if (row && row.scrollIntoView) row.scrollIntoView({ block: "nearest" });
+  }, [open, at, needle]);
+
+  function openList() {
+    const box = wrapRef.current.getBoundingClientRect();
+    const below = window.innerHeight - box.bottom;
+    setFlipUp(below < 320 && box.top > below); // flip upward instead of being cut off at the screen edge
+    setQuery("");
+    const start = options.map((o) => o.value).indexOf(value);
+    setActive(Math.max(0, start));
+    setOpen(true);
+  }
+  function closeList() {
+    setOpen(false);
+    const trigger = wrapRef.current && wrapRef.current.querySelector("button");
+    if (trigger) trigger.focus({ preventScroll: true });
+  }
+  function choose(option) {
+    onChange(option.value);
+    closeList();
+  }
+  function onSearchKey(e) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((at + 1) % Math.max(1, shown.length));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((at - 1 + shown.length) % Math.max(1, shown.length));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActive(Math.max(0, shown.length - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (shown[at]) choose(shown[at]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeList();
+    } else if (e.key === "Tab") {
+      setOpen(false);
+    }
+  }
+
+  if (!searchable) {
+    const groups = [];
+    options.forEach((o) => {
+      const last = groups[groups.length - 1];
+      if (last && last.name === (o.group || "")) last.items.push(o);
+      else groups.push({ name: o.group || "", items: [o] });
+    });
+    const optionEl = (o) => E("option", { key: o.value, value: o.value }, o.label);
+    return E(
+      "div",
+      { style: { position: "relative" } },
+      E(
+        "select",
+        { id, "aria-label": label, className: "ink-select", value, onChange: (e) => onChange(e.target.value), style: fieldStyle },
+        groups.map((g, i) => (g.name ? E("optgroup", { key: "g" + i, label: g.name }, g.items.map(optionEl)) : g.items.map(optionEl))),
+      ),
+      caret,
+    );
+  }
+
+  let lastGroup = "";
+  return E(
+    "div",
+    { ref: wrapRef, style: { position: "relative" } },
+    E(
+      "button",
+      {
+        type: "button",
+        id,
+        className: "ink-select",
+        role: "combobox",
+        "aria-label": label,
+        "aria-haspopup": "listbox",
+        "aria-expanded": open,
+        "aria-controls": id + "-list",
+        onClick: () => (open ? closeList() : openList()),
+        onKeyDown: (e) => {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            if (!open) openList();
+          }
+        },
+        style: Object.assign({}, fieldStyle, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }),
+      },
+      current ? current.label : "",
+    ),
+    caret,
+    open &&
+      E(
+        "div",
+        {
+          className: "ink-pop" + (flipUp ? " is-up" : ""),
+          style: {
+            position: "absolute",
+            left: 0,
+            right: 0,
+            zIndex: 60,
+            top: flipUp ? "auto" : "calc(100% + 6px)",
+            bottom: flipUp ? "calc(100% + 6px)" : "auto",
+            background: panelBg,
+            border: `1px solid ${colors.lineStrong}`,
+            borderRadius: 6,
+            boxShadow: "0 12px 32px rgba(0,0,0,0.35)",
+            overflow: "hidden",
+          },
+        },
+        E("input", {
+          ref: searchRef,
+          type: "text",
+          placeholder: "Search…",
+          "aria-label": "Search the list",
+          "aria-controls": id + "-list",
+          value: query,
+          onChange: (e) => {
+            setQuery(e.target.value);
+            setActive(0);
+          },
+          onKeyDown: onSearchKey,
+          style: {
+            width: "100%",
+            boxSizing: "border-box",
+            minHeight: 48,
+            padding: "10px 14px",
+            background: "transparent",
+            border: "none",
+            borderBottom: `1px solid ${colors.line}`,
+            color: colors.text,
+            fontFamily: "'Source Serif 4', serif",
+            fontSize: 15,
+            outline: "none",
+          },
+        }),
+        E(
+          "div",
+          { ref: listRef, id: id + "-list", role: "listbox", style: { maxHeight: 280, overflowY: "auto" } },
+          shown.length === 0 && E("div", { style: { padding: "12px 14px", fontSize: 14, color: colors.textFaint } }, "No matches"),
+          shown.map((o, i) => {
+            const header = o.group && o.group !== lastGroup;
+            lastGroup = o.group || "";
+            return [
+              header &&
+                E(
+                  "div",
+                  { key: "h" + i, role: "presentation", style: { padding: "10px 14px 4px", fontSize: 11, letterSpacing: 0.6, textTransform: "uppercase", color: colors.textFaint } },
+                  o.group,
+                ),
+              E(
+                "button",
+                {
+                  key: o.value,
+                  type: "button",
+                  role: "option",
+                  "aria-selected": o.value === value,
+                  "data-active": i === at ? "true" : "false",
+                  onMouseEnter: () => setActive(i),
+                  onClick: () => choose(o),
+                  style: {
+                    display: "block",
+                    width: "100%",
+                    minHeight: 44,
+                    padding: "10px 14px",
+                    textAlign: "left",
+                    border: "none",
+                    cursor: "pointer",
+                    fontFamily: "'Source Serif 4', serif",
+                    fontSize: 15,
+                    color: colors.text,
+                    background: i === at ? colors.line : "transparent",
+                    fontWeight: o.value === value ? 600 : 400,
+                  },
+                },
+                o.label,
+              ),
+            ];
+          }),
+        ),
+      ),
+  );
+}
+
 // Command menu (Cmd/Ctrl + K)
 function CommandMenu({ commands, onClose }) {
   const [q, setQ] = useState("");
@@ -1009,10 +1375,10 @@ async function uploadBookContentToStorage(text, hash) {
   return path;
 }
 async function uploadDataUrlImage(bucket, makePath, dataUrl) {
-  const blob = dataUrlToBlob(dataUrl);
+  const blob = dataUrlToBlob(await toWebpDataUrl(dataUrl)); // smaller WebP when possible
   const ext = blob.type.split("/")[1] || "jpg";
   const path = makePath(ext);
-  const { error } = await sb.storage.from(bucket).upload(path, blob, { upsert: false, contentType: blob.type });
+  const { error } = await sb.storage.from(bucket).upload(path, blob, { upsert: false, contentType: blob.type, cacheControl: "31536000" });
   if (error) throw error;
   return path;
 }
@@ -1026,11 +1392,14 @@ function publicBookCoverUrl(path) {
   return sb.storage.from("book-covers").getPublicUrl(path).data.publicUrl;
 }
 async function fetchBookTextFromStorage(storagePath) {
-  const res = await fetch(publicBookContentUrl(storagePath));
+  const res = await inkFetch(publicBookContentUrl(storagePath), 0, 30000);
   if (!res.ok) throw new Error("Couldn't load this book's text from storage.");
   return res.text();
 }
-async function fetchSiteBookRows() {
+function fetchSiteBookRows() {
+  return once("books", loadSiteBookRows);
+}
+async function loadSiteBookRows() {
   const { data, error } = await sb
     .from("books")
     .select("*")
@@ -1153,7 +1522,10 @@ function starPath(filled, emptyFill) {
     strokeLinejoin: "round",
   });
 }
-async function fetchRatingSummaries() {
+function fetchRatingSummaries() {
+  return once("ratings", loadRatingSummaries);
+}
+async function loadRatingSummaries() {
   const { data, error } = await sb.from("book_rating_summary").select("*");
   if (error) throw error;
   const map = {};
@@ -1214,6 +1586,7 @@ function ratingStorage() {
   }
 }
 const sbRate = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { fetch: inkSbFetch },
   auth: {
     storage: ratingStorage(),
     storageKey: "ink-anon-rater",
@@ -1865,6 +2238,25 @@ function BookRatingChip({ book, readerUser, onSignIn }) {
   useEffect(() => {
     loadSummary();
   }, [bookId, userId]);
+  // the popup closes on Escape or when you tap outside it
+  const chipRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e) {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
+    }
+    function onDown(e) {
+      if (chipRef.current && !chipRef.current.contains(e.target)) setOpen(false);
+    }
+    window.addEventListener("keydown", onKey, true);
+    document.addEventListener("pointerdown", onDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [open]);
   const total = summary ? summary.rating_count : 0;
   const avg = summary && total ? Number(summary.avg_rating) : 0;
   const font = "'Inter', system-ui, sans-serif";
@@ -1893,14 +2285,14 @@ function BookRatingChip({ book, readerUser, onSignIn }) {
   });
   return E(
     "div",
-    { style: { position: "relative", flex: "0 0 auto" } },
+    { ref: chipRef, style: { position: "relative", flex: "0 0 auto" } },
     E(
       "button",
       {
         type: "button",
         className: "ink-ctrl",
         "aria-expanded": open,
-        "aria-haspopup": "true",
+        "aria-haspopup": "dialog",
         title: "Ratings",
         onClick: () => setOpen((o) => !o),
         style: {
@@ -1930,6 +2322,9 @@ function BookRatingChip({ book, readerUser, onSignIn }) {
       E(
         "div",
         {
+          role: "dialog",
+          "aria-label": "Ratings",
+          className: "ink-pop",
           style: {
             position: "fixed",
             top: 60,
@@ -1938,6 +2333,8 @@ function BookRatingChip({ book, readerUser, onSignIn }) {
             margin: "0 auto",
             width: 300,
             maxWidth: "calc(100vw - 24px)",
+            maxHeight: "calc(100dvh - 76px)",
+            overflowY: "auto",
             boxSizing: "border-box",
             padding: 18,
             background: uiColors.bgSolid,
@@ -3209,7 +3606,10 @@ function setDictCache(cache) {
     localStorage.setItem(dictCacheKey, JSON.stringify(cache));
   } catch (err) {}
 }
-async function fetchDefinition(word) {
+function fetchDefinition(word) {
+  return once("def:" + String(word).trim().toLowerCase(), () => loadDefinition(word));
+}
+async function loadDefinition(word) {
   const key = word.trim().toLowerCase();
   if (!key) throw new Error("empty");
   const cache = getDictCache();
@@ -3217,7 +3617,7 @@ async function fetchDefinition(word) {
   if (!thirdPartyAllowed()) throw consentRequiredError();
   let res;
   try {
-    res = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(key));
+    res = await inkFetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(key), 0, 8000);
   } catch (err) {
     const offlineErr = new Error("offline");
     offlineErr.offline = true;
@@ -4057,6 +4457,8 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
   useEffect(() => {
     if (settingsOpen || themeMenuOpen) setMoreOpen(false);
   }, [settingsOpen, themeMenuOpen]);
+  useMenuKeyboard(moreOpen, "ink-more-menu", () => setMoreOpen(false), "ink-more-wrap");
+  useMenuKeyboard(themeMenuOpen, "ink-theme-menu", () => setThemeMenuOpen(false), null);
 
   useEffect(() => {
     try {
@@ -4365,18 +4767,22 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
 
   function runSearch(q) {
     setSearchQuery(q);
+    clearTimeout(searchTimer);
     if (!q.trim()) {
       setSearchMatches([]);
       return;
     }
-    const needle = q.trim().toLowerCase();
-    const matches = [];
-    pages.forEach((p, i) => {
-      if (p.toLowerCase().indexOf(needle) !== -1) matches.push(i);
-    });
-    setSearchMatches(matches);
-    setSearchActive(0);
-    if (matches.length) jumpTo(matches[0]);
+    // wait until typing pauses, so a long book is not scanned on every keystroke
+    searchTimer = setTimeout(() => {
+      const needle = q.trim().toLowerCase();
+      const matches = [];
+      pages.forEach((p, i) => {
+        if (p.toLowerCase().indexOf(needle) !== -1) matches.push(i);
+      });
+      setSearchMatches(matches);
+      setSearchActive(0);
+      if (matches.length) jumpTo(matches[0]);
+    }, 250);
   }
   function goToMatch(delta) {
     if (!searchMatches.length) return;
@@ -4540,9 +4946,20 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
   // TOUCH and MOUSE - swipes and edge reveals
   // ----------------------------------------------------------------------
   function onTouchStart(e) {
-    touchStartX.current = e.touches[0].clientX;
+    const touch = e.touches[0];
+    // a swipe that starts within 24px of the left edge is a "go back" gesture, not a page turn
+    edgeTouch = touch.clientX <= 24 ? { x: touch.clientX, y: touch.clientY } : null;
+    touchStartX.current = edgeTouch ? null : touch.clientX;
   }
   function onTouchEnd(e) {
+    if (edgeTouch) {
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - edgeTouch.x;
+      const dy = Math.abs(touch.clientY - edgeTouch.y);
+      edgeTouch = null;
+      if (dx > 80 && dy < dx * 0.6) goBackOrClose(onClose);
+      return;
+    }
     if (hasSelection()) {
       onContentMouseUp();
       touchStartX.current = null;
@@ -5442,11 +5859,12 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
     ),
   );
 
+  const menuFit = { maxHeight: "calc(100dvh - " + (104 + (isFullscreen ? fsTopH : 0)) + "px)", overflowY: "auto" }; // a menu never runs off a short screen
   const themeMenuEl =
     themeMenuOpen &&
     E(
       "div",
-      { style: panelStyle(220) },
+      { id: "ink-theme-menu", role: "menu", "aria-label": "Reading theme", className: "ink-pop", style: Object.assign(panelStyle(220), menuFit) },
       E("div", { style: panelHeadStyle }, "Reading theme"),
       E(
         "div",
@@ -5457,6 +5875,9 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
             {
               key: t,
               type: "button",
+              role: "menuitemradio",
+              "aria-checked": readingTheme === t,
+              className: "ink-menu-item",
               onClick: () => {
                 setReadingTheme(t);
                 setThemeMenuOpen(false);
@@ -5465,6 +5886,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
+                minHeight: 44,
                 padding: "8px 10px",
                 borderRadius: 8,
                 background: readingTheme === t ? uiColors.accentSoft : "transparent",
@@ -5497,7 +5919,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
       {
         type: "button",
         role: "menuitem",
-        className: "ink-ctrl",
+        className: "ink-ctrl ink-menu-item",
         onClick: () => {
           setMoreOpen(false);
           onClick();
@@ -5507,6 +5929,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
           alignItems: "center",
           gap: 10,
           width: "100%",
+          minHeight: 44,
           padding: "9px 10px",
           background: "none",
           border: "none",
@@ -5531,7 +5954,8 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
         id: "ink-more-menu",
         role: "menu",
         "aria-label": "More reader options",
-        style: Object.assign(panelStyle(240), { padding: 6 }),
+        className: "ink-pop",
+        style: Object.assign(panelStyle(240), { padding: 6 }, menuFit),
       },
       viewportW >= 820 &&
         moreItem(
@@ -7129,7 +7553,7 @@ function BookReader({ book, onClose, isAdmin, onDeleteBook, onEditBook, readerUs
         .ink-side-arrow { min-width: 44px; min-height: 44px; }
         .ink-side-arrow[aria-label="Previous page"] { left: max(12px, env(safe-area-inset-left)) !important; }
         .ink-side-arrow[aria-label="Next page"] { right: max(12px, env(safe-area-inset-right)) !important; }
-        .ink-book-stage { touch-action: pan-y; overscroll-behavior-x: none; }
+        .ink-book-stage { touch-action: pan-y; overscroll-behavior-x: auto; }
         #ink-more-menu input, #ink-more-menu select { font-size: 16px; }
       }
       @media (min-width: 721px) { .ink-more-mobile { display: none; } }
@@ -9218,6 +9642,7 @@ function InkAndSpine() {
   // THEME COLOURS - "colors" is the palette for the light or dark theme, used by every screen below
   // ----------------------------------------------------------------------
   const colors = PALETTE[theme];
+  const panelBg = theme === "dark" ? "#1B2340" : "#5B4030"; // solid background for dropdown lists
   // Tell the browser which scheme the page is using, so phone browsers do not auto-darken the light theme.
   useEffect(() => {
     document.documentElement.style.colorScheme = theme === "dark" ? "dark" : "only light";
@@ -10130,6 +10555,16 @@ function InkAndSpine() {
         .ba-pageno { margin-top: 6px; padding-top: 10px; text-align: center; font-size: 14px; font-style: italic; color: #B4B2B0; }
         @media (max-width: 440px) { .ba-book { padding: 26px 24px 14px; } .ba-title { font-size: 30px; } .ba-ribbon { right: 22px; width: 24px; height: 50px; } }
         .mg-pill { transition: background .15s ease, color .15s ease, border-color .15s ease; }
+        /* Popups (menus, dropdown lists) fade and slide in within 150ms: fast enough to feel instant, slow enough to feel smooth. */
+        @keyframes inkPopIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+        @keyframes inkPopInUp { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+        .ink-pop { animation: inkPopIn 150ms cubic-bezier(.2,.8,.2,1); transform-origin: top center; }
+        .ink-pop.is-up { animation-name: inkPopInUp; transform-origin: bottom center; }
+        .ink-select { transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+        .ink-select:hover { border-color: ${colors.accent} !important; }
+        .ink-select:focus-visible { outline: 2px solid ${colors.accent}; outline-offset: 2px; }
+        .ink-menu-item:hover { background: rgba(127,127,127,0.18); }
+        @media (prefers-reduced-motion: reduce) { .ink-pop, .ink-select { animation: none !important; transition: none !important; } }
         .mg-theme-toggle { min-height: 44px; }
         .mg-search-input::placeholder { color: currentColor; opacity: 0.62; }
         .mg-share { position: relative; flex: 0 0 auto; }
@@ -11236,18 +11671,16 @@ function InkAndSpine() {
                   { style: { fontSize: 13, color: colors.textFaint, display: "block", marginBottom: 6 } },
                   "Shelf",
                 ),
-                E(
-                  "select",
-                  {
-                    value: uploadForm.genre,
-                    onChange: (e) => setUploadForm((p) => ({ ...p, genre: e.target.value })),
-                    style: { ...inputStyle, cursor: "pointer" },
-                  },
-                  shelves.map((s) =>
-                    E("option", { key: s.id, value: s.id }, s.title),
-                  ),
-                  E("option", { value: "__new__" }, "Start a new shelf..."),
-                ),
+                E(SelectBox, {
+                  id: "upload-shelf",
+                  label: "Shelf",
+                  value: uploadForm.genre,
+                  onChange: (v) => setUploadForm((p) => ({ ...p, genre: v })),
+                  options: shelves.map((s) => ({ value: s.id, label: s.title })).concat({ value: "__new__", label: "Start a new shelf..." }),
+                  colors,
+                  panelBg,
+                  style: inputStyle,
+                }),
               ),
               uploadForm.genre === "__new__" &&
                 E(
@@ -11568,45 +12001,21 @@ function InkAndSpine() {
               { htmlFor: "share-favorite", style: { fontSize: 13, color: colors.textFaint, marginBottom: -6 } },
               "Share a favorite (optional)",
             ),
-            E(
-              "select",
-              {
-                id: "share-favorite",
-                value: shareChoice,
-                onChange: (e) => setShareChoice(e.target.value),
-                style: {
-                  background: colors.surface,
-                  border: `1px solid ${colors.line}`,
-                  color: colors.text,
-                  fontFamily: "'Source Serif 4', serif",
-                  fontSize: 15,
-                  padding: "12px 14px",
-                  borderRadius: 2,
-                  width: "100%",
-                },
-              },
-              E("option", { value: "" }, "Nothing \u2014 just a comment"),
-              E(
-                "optgroup",
-                { label: "Favorite book" },
-                shelves.flatMap((sh) =>
-                  sh.books.map((b) =>
-                    E(
-                      "option",
-                      { key: sh.id + "::" + b.title, value: "book:" + sh.id + "::" + b.title },
-                      b.title + " \u2014 " + b.author,
-                    ),
+            E(SelectBox, {
+              id: "share-favorite",
+              label: "Share a favorite (optional)",
+              value: shareChoice,
+              onChange: setShareChoice,
+              options: [{ value: "", label: "Nothing \u2014 just a comment" }]
+                .concat(
+                  shelves.flatMap((sh) =>
+                    sh.books.map((b) => ({ value: "book:" + sh.id + "::" + b.title, label: b.title + " \u2014 " + b.author, group: "Favorite book" })),
                   ),
-                ),
-              ),
-              E(
-                "optgroup",
-                { label: "Favorite page" },
-                SHAREABLE_PAGES.map((pg) =>
-                  E("option", { key: pg.id, value: "page:" + pg.id }, pg.label),
-                ),
-              ),
-            ),
+                )
+                .concat(SHAREABLE_PAGES.map((pg) => ({ value: "page:" + pg.id, label: pg.label, group: "Favorite page" }))),
+              colors,
+              panelBg,
+            }),
             E(
               "button",
               { type: "submit", style: { ...btn, alignSelf: "flex-start" } },
@@ -12328,17 +12737,16 @@ function InkAndSpine() {
                 "div",
                 null,
                 E("label", { ...{ style: { fontSize: 13, color: colors.textFaint, display: "block", marginBottom: 6 } }, htmlFor: "edit-shelf" }, "Shelf"),
-                E(
-                  "select",
-                  {
-                    id: "edit-shelf",
-                    value: editForm.shelf,
-                    onChange: (ev) => setEditForm((p) => ({ ...p, shelf: ev.target.value })),
-                    style: { ...inputStyle, cursor: "pointer" },
-                  },
-                  shelves.map((s) => E("option", { key: s.id, value: s.id }, s.title)),
-                  E("option", { value: "__new__" }, "Start a new shelf..."),
-                ),
+                E(SelectBox, {
+                  id: "edit-shelf",
+                  label: "Shelf",
+                  value: editForm.shelf,
+                  onChange: (v) => setEditForm((p) => ({ ...p, shelf: v })),
+                  options: shelves.map((s) => ({ value: s.id, label: s.title })).concat({ value: "__new__", label: "Start a new shelf..." }),
+                  colors,
+                  panelBg,
+                  style: inputStyle,
+                }),
               ),
               editForm.shelf === "__new__" &&
                 E(
@@ -12804,6 +13212,13 @@ function InkAndSpine() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(E(InkAndSpine));
+
+// Offline support: register the service worker (sw.js) once the page has loaded. Only works over https.
+try {
+  "serviceWorker" in navigator &&
+    location.protocol === "https:" &&
+    addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+} catch (err) {}
 </script>
 </body>
 </html>

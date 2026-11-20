@@ -1,4 +1,4 @@
-﻿// Ink & Spine service worker: offline app shell + cached icons.
+// Ink & Spine service worker: offline app shell + cached icons.
 // Bump V to force every device to drop old caches.
 const V = "ink-v1";
 const SHELL = ["./", "manifest.json", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
